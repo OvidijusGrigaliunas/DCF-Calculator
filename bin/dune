@@ -1,0 +1,14 @@
+(executable
+ (public_name mokymasis)
+ (name main)
+ (libraries
+  sqlite3
+  str
+  lwt_ssl
+  cohttp-lwt-unix
+  yojson
+  stdio
+  base
+  csv
+  unix
+  stock_ratings))

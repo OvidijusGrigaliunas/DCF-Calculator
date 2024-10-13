@@ -1,0 +1,429 @@
+open Base
+open Stdio
+
+let db = Secrets.current_dir ^ "stocks" |> Sqlite3.db_open
+
+let rec print_results a =
+  match a with
+  | [] -> printf ""
+  | hd :: tl -> (
+      match hd with
+      | Some str ->
+          print_endline str;
+          print_results tl
+      | None -> print_results tl)
+
+let row_exists table identifier value =
+  let sql =
+    Printf.sprintf "SELECT * FROM %s WHERE %s = \"%s\";" table identifier value
+  in
+  let result = Sqlite3.prepare db sql |> Sqlite3.step in
+  match result with Sqlite3.Rc.ROW -> true | _ -> false
+
+let fetch_results stmt =
+  let open Sqlite3 in
+  let rec f accum =
+    match Sqlite3.step stmt with
+    | Rc.DONE ->
+        finalize stmt |> ignore;
+        List.rev accum
+    | Rc.ROW -> f (Array.to_list (row_data stmt) :: accum)
+    | Rc.ERROR -> failwith (Sqlite3.Rc.to_string Rc.ERROR)
+    | _ -> failwith "Unexpected result code"
+  in
+  f []
+
+let select_sector_and_industry sector industry =
+  let sql_in =
+    Printf.sprintf "SELECT risk FROM Industries WHERE industry = \"%s\";"
+      industry
+  in
+  let sql_sec =
+    Printf.sprintf "SELECT risk FROM Sectors WHERE sector = \"%s\";" sector
+  in
+  let sec_risk =
+    Sqlite3.prepare db sql_sec |> fetch_results |> List.hd_exn |> List.hd_exn
+    |> Sqlite3.Data.to_float_exn
+  in
+  let in_risk =
+    Sqlite3.prepare db sql_in |> fetch_results |> List.hd_exn |> List.hd_exn
+    |> Sqlite3.Data.to_float_exn
+  in
+  (sec_risk, in_risk)
+
+let select_stocks_symbols () =
+  let sql = "SELECT symbol FROM Stocks" in
+  let stmt = Sqlite3.prepare db sql in
+  let sql_data = fetch_results stmt in
+  let rec results data =
+    match data with
+    | hd :: tl -> (
+        match hd with
+        | symbol :: _ -> [ Sqlite3.Data.to_string symbol ] @ results tl
+        | [] -> [])
+    | [] -> []
+  in
+  let rec clean_up data =
+    match data with Some hd :: tl -> [ hd ] @ clean_up tl | _ -> []
+  in
+  results sql_data |> clean_up
+
+let insert_industry industry =
+  let exists = row_exists "Industries" "industry" industry in
+  match exists with
+  | true -> ()
+  | false -> (
+      let get_risk =
+        printf
+          "Industry doesn't exist in database\n\
+           Please write estimated security of %s industry (0-10)\n\
+           %!"
+          industry;
+        let input = In_channel.input_line In_channel.stdin in
+
+        match input with Some line -> Float.of_string line | None -> 0.0
+      in
+      let sql =
+        Printf.sprintf
+          "INSERT INTO Industries (industry, risk) \n      VALUES (\"%s\", %f)"
+          industry (get_risk /. 10.0)
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> printf "%s was succesfuly updated%!\n" industry
+      | code -> print_endline code)
+
+let insert_sector sector =
+  let exists = row_exists "Sectors" "sector" sector in
+  match exists with
+  | true -> ()
+  | false -> (
+      let get_risk =
+        printf
+          "Sector doesn't exist in database\n\
+           Please write estimated security of %s sector (0-10)\n\
+           %!"
+          sector;
+        let input = In_channel.input_line In_channel.stdin in
+        match input with Some line -> Float.of_string line | None -> 0.0
+      in
+      let sql =
+        Printf.sprintf
+          "INSERT INTO Sectors (sector, risk) \n      VALUES (\"%s\", %f)"
+          sector (get_risk /. 10.0)
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> printf "%s was succesfuly updated\n%!" sector
+      | code -> print_endline code)
+
+let insert_country country =
+  let exists = row_exists "Countries" "country" country in
+  match exists with
+  | true -> ()
+  | false -> (
+      let get_tax =
+        printf
+          "Country doesn't exist in database\n\
+           Please write tax rate %s (0-100%%)\n\
+           %!"
+          country;
+        let input = In_channel.input_line In_channel.stdin in
+        match input with Some line -> Float.of_string line | None -> 0.0
+      in
+      let get_bond_rate =
+        printf "Please write 10y bond rate of %s (0-100%%)\n%!" country;
+        let input = In_channel.input_line In_channel.stdin in
+        match input with Some line -> Float.of_string line | None -> 0.0
+      in
+      let sql =
+        Printf.sprintf
+          "INSERT INTO Countries (country, tax, bonds_rate) \n\
+          \      VALUES (\"%s\", %f, %f)" country (get_tax /. 100.0)
+          (get_bond_rate /. 100.0)
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> printf "%s was succesfuly updated\n" country
+      | code -> print_endline code)
+
+let update_stock ticker
+    (price, beta, market_cap, currency, industry, sector, country, pullable) =
+  let stock_exists = row_exists "Stocks" "symbol" ticker in
+  match stock_exists with
+  | false -> (
+      insert_country country;
+      insert_sector sector;
+      insert_industry industry;
+      let sql =
+        Printf.sprintf
+          "INSERT INTO Stocks (symbol, price, beta, market_cap, currency, \n\
+          \                          industry, sector, country, pullable)\n\
+          \      VALUES (\"%s\",%f,%f,%i,\"%s\",\"%s\",\"%s\",\"%s\",\"%s\");"
+          ticker price beta market_cap currency industry sector country pullable
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> printf "%s was succesfuly pulled\n" ticker
+      | code -> 
+      print_endline sql;
+        print_endline code)
+  | true -> (
+      let sql =
+        Printf.sprintf
+          "UPDATE Stocks Set\n\
+          \        price = %f,\n\
+          \        beta = %f,\n\
+          \        market_cap = %i,\n\
+          \        currency = \"%s\", \n\
+          \        industry = \"%s\",\n\
+          \        sector = \"%s\",\n\
+          \        country = \"%s\",\n\
+          \        pullable = \"%s\"\n\
+          \ Where symbol = \"%s\";" price beta market_cap currency industry
+          sector country pullable ticker
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> printf "%s was succesfuly updated\n%!" ticker
+      | code ->
+         print_endline code)
+
+let delete_financials ticker =
+  let sql =
+    Printf.sprintf "DELETE FROM Financials where symbol = \"%s\"" ticker
+  in
+  let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match deleted with "OK" -> true | _ -> false
+
+let update_financials ticker
+    ( year,
+      period,
+      revenue,
+      net_income,
+      eps,
+      rnd,
+      cash,
+      assests,
+      debt,
+      free_cash_flow,
+      currency ) =
+  let sql =
+    Printf.sprintf
+      "INSERT INTO Financials (symbol, year, period, net_income, free_cash_flow,\n\
+      \                             revenue, r_and_d, eps, cash, \
+       total_assests, total_debt, currency)\n\
+      \      VALUES (\"%s\",\"%s\",\"%s\",%i, %i, %i, %i, %f, %i, %i, %i, \
+       \"%s\");"
+      ticker year period net_income free_cash_flow revenue rnd eps cash assests
+      debt currency
+  in
+  let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match inserted with
+  | "OK" ->
+      printf "%s %s %s financials were succesfuly updated\n%!" ticker year
+        period
+  | code -> print_endline code
+
+let update_price ticker (price, market_cap, pe) =
+  let stock_exists = row_exists "Stocks" "symbol" ticker in
+  match stock_exists with
+  | false -> ()
+  | true -> (
+      let sql =
+        Printf.sprintf
+          "UPDATE Stocks Set\n\
+          \        price = %f,\n\
+          \        market_cap = %i,\n\
+          \        pe = %f\n\
+          \ \n\
+          \         Where symbol = \"%s\";" price market_cap pe ticker
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> printf "%s price was succesfuly updated\n%!" ticker
+      | code -> print_endline code)
+
+let select_ratings_data () =
+  let sql =
+    Printf.sprintf
+      "\n\
+      \    SELECT\n\
+      \      s.symbol as ss, s.industry, s.sector, s.market_cap * s.ratio,\n\
+      \      s.pe, s.price * s.ratio, f.total_debt * \
+       f.ratio,\n\
+      \      f.free_cash_flow * f.ratio, c.tax, \
+       c.bonds_rate,
+       s.status, s.target,\n\
+       MAX(f.year) as ye
+       \    FROM (\n\
+       \t\tSELECT Stocks.*, CASE WHEN Stocks.currency = \"EUR\" OR \
+       Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio\n\
+       \t\tFROM Stocks\n\
+       \t\tLEFT JOIN Currencies\n\
+       \t\tON Stocks.currency = Currencies.currency ) \n\
+       \t\tAS s\n\
+      \    LEFT JOIN (\n\
+       \t\tSELECT Financials.*, CASE WHEN Financials.currency = \"EUR\" OR \
+       Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio\n\
+       \t\tFROM Financials \n\
+       \t\tLEFT JOIN Currencies\n\
+       \t\tON Financials.currency = Currencies.currency) \n\
+       \t\tAS f\n\
+      \    ON f.symbol = s.symbol\n\
+      \    LEFT JOIN Countries AS c\n\
+      \    on s.country = c.country\n\
+      \    GROUP BY s.symbol\n\
+      \    ORDER BY s.symbol ASC, f.year DESC;\n\
+      \    "
+  in
+  let stmt = Sqlite3.prepare db sql in
+  let sql_data = fetch_results stmt in
+  let rec results data =
+    match data with
+    | hd :: tl -> (
+        match hd with
+        | tick_symbol :: industry :: sector :: market_cap :: pe :: price
+          :: debt :: free_cash_flow :: tax 
+          :: bond_rate :: status :: target :: _ ->
+            [
+              ( Sqlite3.Data.to_string_exn tick_symbol,
+                Sqlite3.Data.to_string_exn industry,
+                Sqlite3.Data.to_string_exn sector,
+                Sqlite3.Data.to_float_exn market_cap,
+                Sqlite3.Data.to_float_exn pe,
+                Sqlite3.Data.to_float_exn price,
+                Sqlite3.Data.to_float_exn debt,
+                Sqlite3.Data.to_float_exn free_cash_flow,
+                Sqlite3.Data.to_float_exn tax,
+                Sqlite3.Data.to_float_exn bond_rate, 
+                Sqlite3.Data.to_string_exn status,
+                Sqlite3.Data.to_int_exn target
+                );
+            ]
+            @ results tl
+        | _ -> [])
+    | [] -> []
+  in
+  results sql_data
+
+let update_speculations symbol growth return moat =
+  let sql_delete =
+    Printf.sprintf
+      "\n    DELETE FROM Speculative_data WHERE symbol = \"%s\"\n    " symbol
+  in
+  let deleted = Sqlite3.exec db sql_delete |> Sqlite3.Rc.to_string in
+  match deleted with
+  | "OK" -> (
+      let sql =
+        Printf.sprintf
+          "\n\
+          \      INSERT INTO Speculative_data (symbol, growth, \
+           required_return, moat)\n\
+          \      VALUES (\"%s\", %f, %f, %f); \n\
+          \      " symbol growth return moat
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> print_endline "Speculation updated"
+      | code -> printf "Update failed: error %s" code)
+  | code -> print_endline code
+
+let insert_forex names prices =
+  let rec f names prices =
+    match names with
+    | hd1 :: tl1 -> (
+        match prices with
+        | hd2 :: tl2 ->
+            let from, target =
+              match String.split hd1 ~on:'/' with
+              | x :: y :: _ -> (x, y)
+              | _ -> failwith "Forex name error"
+            in
+            Printf.sprintf "(\"%s\", \"%s\", %f), " from target hd2 ^ f tl1 tl2
+        | [] -> "")
+    | [] -> ""
+  in
+  let deleted =
+    Sqlite3.exec db "DELETE FROM Currencies" |> Sqlite3.Rc.to_string
+  in
+  match deleted with
+  | "OK" -> (
+      let unclean_values = f names prices in
+      let values_string =
+        String.sub unclean_values ~pos:0 ~len:(String.length unclean_values - 2)
+      in
+      let sql =
+        Printf.sprintf
+          "\n\
+          \        INSERT INTO Currencies (currency, target, ratio)\n\
+          \        VALUES %s" values_string
+      in
+      let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match inserted with
+      | "OK" -> print_endline "Forex updated"
+      | code -> failwith code)
+  | code -> failwith code
+
+let select_currencies () =
+  let sql = "
+    SELECT s.currency
+    FROM (SELECT DISTINCT currency FROM Stocks) as s
+    WHERE s.currency != \"EUR\"
+    UNION 
+    SELECT f.currency
+    FROM (SELECT DISTINCT currency FROM Financials) as f
+    WHERE f.currency != \"EUR\"
+    "
+  in  
+  let stmt = Sqlite3.prepare db sql in
+  let data = fetch_results stmt in
+  List.map data ~f:(fun x ->
+    List.map x ~f:(fun y -> Sqlite3.Data.to_string_exn y)
+    |> String.concat)
+
+let select_first_and_last_fcf () =
+  let sql = "
+    SELECT a.symbol, b.b, a.a
+    FROM( SELECT symbol, free_cash_flow as a, max(year) as y
+    FROM Financials
+    GROUP BY symbol
+    ORDER BY symbol desc) as a
+    LEFT JOIN
+    (SELECT symbol, free_cash_flow as b, min(year) as y
+    FROM Financials
+    GROUP BY symbol) as b
+    ON a.symbol = b.symbol
+    "
+  in  
+  let stmt = Sqlite3.prepare db sql in
+  let data = fetch_results stmt in
+  let rec results data =
+    match data with
+    | hd :: tl -> (
+        match hd with
+        | tick_symbol :: old_free_cash_flow :: new_free_cash_flow :: _ ->
+            [
+              ( Sqlite3.Data.to_string_exn tick_symbol,
+                Sqlite3.Data.to_int_exn old_free_cash_flow |> Float.of_int,
+                Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int);
+            ]
+            @ results tl
+        | _ -> [])
+    | [] -> []
+  in
+  results data
+
+let delete_stock ticker_symbol =
+  let sql = Printf.sprintf "
+    DELETE FROM Stocks WHERE symbol = \"%s\";
+    DELETE FROM Financials WHERE symbol = \"%s\";
+    DELETE FROM Speculative_data WHERE symbol = \"%s\";
+    " ticker_symbol ticker_symbol ticker_symbol
+  in
+  let deleted =
+    Sqlite3.exec db sql |> Sqlite3.Rc.to_string
+  in
+  match deleted with
+  | "OK" -> printf "%s removed\n" ticker_symbol
+  | code -> printf "Error: %s\n" code
