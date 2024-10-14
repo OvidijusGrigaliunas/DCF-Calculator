@@ -70,7 +70,7 @@ let rate_stock_price intrinsic_price current_price target =
 
 let print_price_rating ratings =
   let max_col = 5 in
-  let row_len = 27 in
+  let row_len = 33 in
   let rec seperate_row col =
     if col >= 1 then (
       if col = max_col then printf "+";
@@ -84,8 +84,10 @@ let print_price_rating ratings =
     | hd :: tl ->
         let ticker_symbol, discount, price = hd in
         printf "| %*s" (-5) ticker_symbol;
-        printf " %*.0f%% " (5) (discount *. 100.0);
-        printf " %*.1f Eur " (5) (price /. discount);
+        printf "C: %*.1f€ " (5) (price);
+        printf "T:";
+        printf "%*.0f%% " (4) (discount *. 100.0);
+        printf "%*.1f€ " (5) (price /. discount);
         if col = 1 then (
           print_endline "|";
           seperate_row max_col;
