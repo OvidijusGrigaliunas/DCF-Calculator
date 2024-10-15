@@ -70,15 +70,19 @@ let rate_stock_price intrinsic_price current_price target =
 
 let print_price_rating ratings =
   let max_col = 5 in
-  let row_len = 33 in
-  let rec seperate_row col =
+  let row_len = 33 in  
+  let rec seperate_row ?(max = 0) col =
+    let max = if max < col then col else max in
     if col >= 1 then (
-      if col = max_col then printf "+";
+      if col = max then printf "+";
       String.make (row_len - 2) '-' |> printf "%s+";
-      seperate_row (col - 1))
+      seperate_row ~max:max (col - 1))
     else print_endline ""
   in
-  seperate_row max_col;
+  if max_col <= (List.length ratings) then
+    seperate_row max_col
+  else
+    seperate_row (List.length ratings);
   let rec print ratings max_col col =
     match ratings with
     | hd :: tl ->
@@ -96,14 +100,13 @@ let print_price_rating ratings =
     | [] ->
         if max_col - col > 0 then
         (print_endline "|";
-        printf "+";
         max_col - col |> seperate_row)
   in
   print ratings max_col max_col
 
 let filter_by_status stock_status filter =
     match filter with
-          | "None" -> true
+          | "none" -> true
           | h -> String.(=) h (String.lowercase stock_status) 
 
 let filter_under price_discount treshold =
