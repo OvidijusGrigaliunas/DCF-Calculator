@@ -42,7 +42,7 @@ let check_for_arg_dupes available_args args =
 
 let get_available_arguments command =
   match command with
-  | "rate" -> [ [ "fair"; "under"; "owned"; "target" ] ]
+  | "rate" -> [ [ "fair"; "under"; "owned"; "target"; "saved" ] ]
   | "update" -> [ [ "price"; "stock"; "forex" ] ]
   | _ -> []
 
@@ -109,7 +109,8 @@ let stocks_command_parser args =
       let stock_commands =
         [
           ("update", "Args: price, stock, forex");
-          ("rate: rates stocks value", "Arguments: pull; (fair; under, owned, target)");
+          ("rate", "Args: fair, under, owned, target, saved");
+          ("pull", "");
         ]
       in
       print_commands stock_commands
