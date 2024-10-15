@@ -101,6 +101,19 @@ let print_price_rating ratings =
   in
   print ratings max_col max_col
 
+let filter_by_status stock_status filter =
+    match filter with
+          | "None" -> true
+          | h -> String.(=) h (String.lowercase stock_status) 
+
+let filter_under price_discount treshold =
+          if
+            Float.( < ) price_discount treshold
+            && Float.( > ) price_discount 0.0
+          then true
+          else false
+        
+
 let rate_stocks ?(filter = "none") stock_data =
   let rec ratings filter stock_data =
     match stock_data with
@@ -131,19 +144,11 @@ let rate_stocks ?(filter = "none") stock_data =
         let upside = calc_upside market_cap pe intrinsic_value in
         let intrinsic_price = get_intrinsic_price price upside in
         let price_discount = rate_stock_price intrinsic_price price target in
-        let filter_under price_discount treshold =
-          if
-            Float.( < ) price_discount treshold
-            && Float.( > ) price_discount 0.0
-          then true
-          else false
-        in
         let is_printable =
-          match filter with
-          | "none" -> true
+        match filter with
           | "under" -> filter_under price_discount 1.0
           | "fair" -> filter_under price_discount 1.2
-          | h -> String.(=) h (String.lowercase status) 
+          | hd -> filter_by_status status hd 
         in
         if is_printable then
           [ (tick_symbol, price_discount, price) ] @ ratings filter tl
