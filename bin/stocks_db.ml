@@ -51,8 +51,12 @@ let select_sector_and_industry sector industry =
   in
   (sec_risk, in_risk)
 
-let select_stocks_symbols () =
-  let sql = "SELECT symbol FROM Stocks" in
+let select_stocks_symbols ?(pull=true) () =
+  let pull_str = match pull with
+  | true -> "TRUE"
+  | false -> "FALSE"
+  in
+  let sql = Printf.sprintf "SELECT symbol FROM Stocks WHERE pullable = \"%s\"" pull_str in
   let stmt = Sqlite3.prepare db sql in
   let sql_data = fetch_results stmt in
   let rec results data =
