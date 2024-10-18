@@ -70,7 +70,7 @@ let rate_stock_price intrinsic_price current_price target =
 
 let print_price_rating ratings =
   let max_col = 5 in
-  let row_len = 33 in  
+  let row_len = 34 in  
   let rec seperate_row ?(max = 0) col =
     let max = if max < col then col else max in
     if col >= 1 then (
@@ -87,11 +87,17 @@ let print_price_rating ratings =
     match ratings with
     | hd :: tl ->
         let ticker_symbol, discount, price = hd in
-        printf "| %*s" (-5) ticker_symbol;
-        printf "C: %*.1f€ " (5) (price);
+        printf "| %*s" (-6) ticker_symbol;
+        if Float.(<) price 10.0 then
+          printf "C: %*.3f€ " (5) (price)
+        else
+          printf "C: %*.1f€ " (5) (price);
         printf "T:";
         printf "%*.0f%% " (4) (discount *. 100.0);
-        printf "%*.1f€ " (5) (price /. discount);
+        if Float.(<) (price/.discount) 10.0 then
+          printf "%*.3f€ " (5) (price /. discount)
+        else
+          printf "%*.1f€ " (5) (price /. discount);
         if col = 1 then (
           print_endline "|";
           seperate_row max_col;
