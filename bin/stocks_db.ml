@@ -77,7 +77,7 @@ let insert_industry industry =
   match exists with
   | true -> ()
   | false -> (
-      let get_risk =
+      let risk =
         printf
           "Industry doesn't exist in database\n\
            Please write estimated security of %s industry (0-10)\n\
@@ -90,7 +90,7 @@ let insert_industry industry =
       let sql =
         Printf.sprintf
           "INSERT INTO Industries (industry, risk) \n      VALUES (\"%s\", %f)"
-          industry (get_risk /. 10.0)
+          industry (risk /. 10.0)
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
@@ -102,7 +102,7 @@ let insert_sector sector =
   match exists with
   | true -> ()
   | false -> (
-      let get_risk =
+      let risk =
         printf
           "Sector doesn't exist in database\n\
            Please write estimated security of %s sector (0-10)\n\
@@ -114,7 +114,7 @@ let insert_sector sector =
       let sql =
         Printf.sprintf
           "INSERT INTO Sectors (sector, risk) \n      VALUES (\"%s\", %f)"
-          sector (get_risk /. 10.0)
+          sector (risk /. 10.0)
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
@@ -126,7 +126,7 @@ let insert_country country =
   match exists with
   | true -> ()
   | false -> (
-      let get_tax =
+      let tax =
         printf
           "Country doesn't exist in database\n\
            Please write tax rate %s (0-100%%)\n\
@@ -135,7 +135,7 @@ let insert_country country =
         let input = In_channel.input_line In_channel.stdin in
         match input with Some line -> Float.of_string line | None -> 0.0
       in
-      let get_bond_rate =
+      let bond_rate =
         printf "Please write 10y bond rate of %s (0-100%%)\n%!" country;
         let input = In_channel.input_line In_channel.stdin in
         match input with Some line -> Float.of_string line | None -> 0.0
@@ -143,8 +143,8 @@ let insert_country country =
       let sql =
         Printf.sprintf
           "INSERT INTO Countries (country, tax, bonds_rate) \n\
-          \      VALUES (\"%s\", %f, %f)" country (get_tax /. 100.0)
-          (get_bond_rate /. 100.0)
+          \      VALUES (\"%s\", %f, %f)" country (tax /. 100.0)
+          (bond_rate /. 100.0)
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
