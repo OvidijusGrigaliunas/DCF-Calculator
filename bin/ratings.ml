@@ -4,7 +4,7 @@ open Stdio
 let first_last_financials = Stocks_db.select_first_and_last_fcf ()
 
 let calc_eq_discount ?(expected_return = 0.15) pe market_cap debt =
-  let ep_disc = (300.0 +. pe) /. 315.0 in
+  let ep_disc = (308.0 +. pe) /. 320.0 in
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   ep_disc *. eq_disc
 
@@ -23,7 +23,7 @@ let get_industry_rating industry sector =
     Stocks_db.select_sector_and_industry sector industry
   in
   let industry_and_sector_risk =
-    (industry_risk +. sector_risk) /. 3.0 +. 0.67
+    (industry_risk +. sector_risk) /. 10.0 +. 0.9
   in
   industry_and_sector_risk 
 
@@ -34,22 +34,23 @@ let calc_discount market_cap pe debt tax bond_rate
   (eq_disc +. debt_disc) *. industry_rating
 
 let  calc_DFCA cash_flow growth discount =
-  let rec loop year limiter prev_growth= 
+  let rec loop cash_flow year limiter growth growth_multiplier = 
     (match year with
-    | 11.0 -> (0.0, 0.0)
+    | 10.0 -> (0.0, 0.0)
     | year ->
-      let multiplier = 0.95 -. Float.abs(growth) **. 0.5 /. 6.0 in
-      let current_year_growth = prev_growth *. (if Float.(<) limiter 0.0 then multiplier else 1.0) in
+      let current_year_growth = growth *. (if Float.(<) limiter 0.0 then growth_multiplier else 1.0) in
       let cash_flow_growth =
-        cash_flow *. ((1.0 +. current_year_growth) **. year)
+        cash_flow *. (1.0 +. current_year_growth) 
       in
       let cash_flow_discounted =
         cash_flow_growth /. ((1.0 +. discount) **. year)
       in
-      let new_limiter = limiter -. Float.abs (growth *. year) in
-      let x, y = loop (year +. 1.0) new_limiter current_year_growth in
-      (cash_flow_growth +. x, cash_flow_discounted +. y))
-  in loop 0.0 1.0 growth 
+      let new_limiter = limiter -. Float.abs growth in
+      let x, y = loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier in
+      (cash_flow_growth +. x, cash_flow_discounted +. y)) 
+  in
+  let multiplier = 0.92 -. Float.abs(growth) **. 0.9 /. 5.0 in
+  loop cash_flow 0.0 0.7 growth multiplier
 
 let calc_terminal_value pe growth_of_10y discount =
   let term_val = pe *. growth_of_10y in
@@ -122,7 +123,6 @@ let filter_under price_discount treshold =
           then true
           else false
         
-
 let rate_stocks ?(filter = "none") stock_data =
   let rec ratings filter stock_data =
     match stock_data with
@@ -152,6 +152,7 @@ let rate_stocks ?(filter = "none") stock_data =
         in
         let upside = calc_upside market_cap pe intrinsic_value in
         let intrinsic_price = get_intrinsic_price price upside in
+        
         let price_discount = rate_stock_price intrinsic_price price target in
         let is_printable =
         match filter with
