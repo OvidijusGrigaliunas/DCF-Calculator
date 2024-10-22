@@ -23,7 +23,7 @@ let get_industry_rating industry sector =
     Stocks_db.select_sector_and_industry sector industry
   in
   let industry_and_sector_risk =
-    (industry_risk +. sector_risk) /. 10.0 +. 0.9
+    (industry_risk +. sector_risk) /. 6.0 +. 0.84
   in
   industry_and_sector_risk 
 
