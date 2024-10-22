@@ -33,7 +33,7 @@ let calc_discount market_cap pe debt tax bond_rate
   let debt_disc = calc_debt_discount market_cap debt tax bond_rate in
   (eq_disc +. debt_disc) *. industry_rating
 
-let  calc_DFCA cash_flow growth discount =
+let calc_DFCA cash_flow growth discount =
   let rec loop cash_flow year limiter growth growth_multiplier = 
     (match year with
     | 10.0 -> (0.0, 0.0)
@@ -67,7 +67,10 @@ let calc_upside market_cap ttm instrinsic_value =
 let get_intrinsic_price price upside = price *. (1.0 +. upside)
 
 let rate_stock_price intrinsic_price current_price target =
-  current_price /. intrinsic_price /. (Float.of_int target) *. 100.0
+  let rating = current_price /. intrinsic_price in
+  let target_rating = rating /. (Float.of_int target) *. 100.0 in
+  printf "%f" target_rating;
+  (rating, target_rating)
 
 let print_price_rating ratings =
   let max_col = 5 in
@@ -153,15 +156,16 @@ let rate_stocks ?(filter = "none") stock_data =
         let upside = calc_upside market_cap pe intrinsic_value in
         let intrinsic_price = get_intrinsic_price price upside in
         
-        let price_discount = rate_stock_price intrinsic_price price target in
+        let rating, target_rating = rate_stock_price intrinsic_price price target in
+        Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =
         match filter with
-          | "under" -> filter_under price_discount 1.0
-          | "fair" -> filter_under price_discount 1.2
+          | "under" -> filter_under target_rating 1.0
+          | "fair" -> filter_under target_rating 1.2
           | hd -> filter_by_status status hd 
         in
         if is_printable then
-          [ (tick_symbol, price_discount, price) ] @ ratings filter tl
+          [ (tick_symbol, target_rating, price) ] @ ratings filter tl
         else ratings filter tl
   in
   ratings filter stock_data |> print_price_rating

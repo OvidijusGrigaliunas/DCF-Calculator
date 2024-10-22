@@ -121,6 +121,35 @@ let insert_sector sector =
       | "OK" -> printf "%s was succesfuly updated\n%!" sector
       | code -> print_endline code)
 
+let insert_ratings symbol base_rating target_rating =
+    let exists = row_exists "Ratings" "symbol" symbol in
+    match exists with
+    | false ->
+      let sql = Printf.sprintf
+        "INSERT INTO RATINGS (symbol, base_rating, target_rating)
+         VALUES (\"%s\", %f, %f)" symbol base_rating target_rating
+      in
+        let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+        (match inserted with
+        | "OK" -> ()
+        | code ->
+          printf "%s error: " symbol;
+          print_endline code)
+    | true -> 
+      let sql = Printf.sprintf
+         "UPDATE Ratings
+          SET base_rating = %f, target_rating = %f \n     
+          WHERE symbol =  \"%s\"" base_rating target_rating symbol
+      in
+        let updated = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+        (match updated with
+        | "OK" -> ()
+        | code ->
+          printf "%s error: " symbol;
+          print_endline code)
+
+      
+  
 let insert_country country =
   let exists = row_exists "Countries" "country" country in
   match exists with
