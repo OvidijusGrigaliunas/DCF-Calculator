@@ -234,8 +234,6 @@ let update_financials ticker
       period,
       revenue,
       net_income,
-      eps,
-      rnd,
       cash,
       assests,
       debt,
@@ -244,18 +242,16 @@ let update_financials ticker
   let sql =
     Printf.sprintf
       "INSERT INTO Financials (symbol, year, period, net_income, free_cash_flow,\n\
-      \                             revenue, r_and_d, eps, cash, \
+      \                             revenue, cash, \
        total_assests, total_debt, currency)\n\
-      \      VALUES (\"%s\",\"%s\",\"%s\",%i, %i, %i, %i, %f, %i, %i, %i, \
+      \      VALUES (\"%s\",\"%s\",\"%s\",%i, %i, %i, %i, %i, %i, \
        \"%s\");"
-      ticker year period net_income free_cash_flow revenue rnd eps cash assests
+      ticker year period net_income free_cash_flow revenue cash assests
       debt currency
   in
   let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
   match inserted with
-  | "OK" ->
-      printf "%s %s %s financials were succesfuly updated\n%!" ticker year
-        period
+  | "OK" -> ()
   | code -> print_endline code
 
 let update_price ticker (price, market_cap, pe) =
@@ -417,17 +413,27 @@ let select_currencies () =
 
 let select_first_and_last_fcf () =
   let sql = "
-    SELECT a.symbol, b.b, a.a
-    FROM( SELECT symbol, free_cash_flow as a, max(year) as y
-    FROM Financials
-    GROUP BY symbol
-    ORDER BY symbol desc) as a
-    LEFT JOIN
-    (SELECT symbol, free_cash_flow as b, min(year) as y
-    FROM Financials
-    GROUP BY symbol) as b
-    ON a.symbol = b.symbol
-    "
+        WITH temp_table (symbol,year, free_cash_flow,n) 
+        	AS (SELECT f.symbol, f.year, f.free_cash_flow, n
+        	FROM (
+        		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
+        		FROM Financials
+        	) AS f
+        	WHERE n <= 6)
+	
+        SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
+        FROM (
+        	SELECT symbol, free_cash_flow, n, max(year)
+        	FROM 
+        	temp_table
+        	Group by symbol) a
+        LEFT JOIN (
+        	SELECT symbol, free_cash_flow, n, min(year) 
+        	FROM 
+        	temp_table
+        	Group by symbol) b 
+      	ON b.symbol = a.symbol;
+       "
   in  
   let stmt = Sqlite3.prepare db sql in
   let data = fetch_results stmt in
@@ -435,11 +441,12 @@ let select_first_and_last_fcf () =
     match data with
     | hd :: tl -> (
         match hd with
-        | tick_symbol :: old_free_cash_flow :: new_free_cash_flow :: _ ->
+        | tick_symbol :: new_free_cash_flow :: old_free_cash_flow :: duration :: _ ->
             [
               ( Sqlite3.Data.to_string_exn tick_symbol,
+                Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int,
                 Sqlite3.Data.to_int_exn old_free_cash_flow |> Float.of_int,
-                Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int);
+                Sqlite3.Data.to_int_exn duration |> Float.of_int);
             ]
             @ results tl
         | _ -> [])

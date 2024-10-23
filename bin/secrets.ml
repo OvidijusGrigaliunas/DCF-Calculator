@@ -17,5 +17,4 @@ let api_key =
   match file with
   | [] -> ""
   | hd :: _ ->
-      let url = "apikey=" ^ hd in
-      url
+      hd

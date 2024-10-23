@@ -12,11 +12,11 @@ let calc_debt_discount market_cap debt tax bond_rate =
   debt /. market_cap *. bond_rate *. (1.0 -. tax)
 
 let calc_growth ticker_symbol =
-  let _, old_fcf, new_fcf = List.find_exn first_last_financials ~f:(
-    fun (a, _, _) -> String.(=) a ticker_symbol)
+  let _, new_fcf, old_fcf, duration = List.find_exn first_last_financials ~f:(
+    fun (a, _, _, _) -> String.(=) a ticker_symbol)
   in
   let increase = (new_fcf -. old_fcf) /. (Float.abs old_fcf) +. 1.0  in
-  increase **. 0.25 -. 1.0
+  increase **. (1.0 /. duration) -. 1.0
   
 let get_industry_rating industry sector =
   let industry_risk, sector_risk =
@@ -69,7 +69,6 @@ let get_intrinsic_price price upside = price *. (1.0 +. upside)
 let rate_stock_price intrinsic_price current_price target =
   let rating = current_price /. intrinsic_price in
   let target_rating = rating /. (Float.of_int target) *. 100.0 in
-  printf "%f" target_rating;
   (rating, target_rating)
 
 let print_price_rating ratings =

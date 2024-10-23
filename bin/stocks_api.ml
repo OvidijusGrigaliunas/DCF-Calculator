@@ -13,31 +13,46 @@ let compute ~time ~f =
 
 let to_int_exn = function
   | `Float f -> Int.of_float f
+  | `String s ->
+    (match s with
+      | "None" -> 0
+      | _ -> Int.of_string s)
   | `Int i -> i
   | _ -> failwith "Expected float or int"
 
 let to_float_exn = function
   | `Float f -> f
+  | `String s -> 
+    (match s with
+      | "None" -> 0.0
+      | _ -> Float.of_string s)
   | `Int i -> Float.of_int i
   | _ -> failwith "Expected float or int"
 
-let extract_from_json_list data filter default f =
-  let json = Yojson.Basic.from_string data |> to_list in
-  let results = List.map json ~f:(fun x -> member filter x |> f) in
+let extract_from_json_list ?(key = "") data filter default f =
+  let json = Yojson.Basic.from_string data in
+  let obj = 
+    match key with
+    | "" -> to_list json
+    | key -> Yojson.Basic.Util.(member key json) |> to_list in
+  let results = List.map obj ~f:(fun x -> member filter x |> f) in
   match results with
   | [] -> Array.of_list [ default ]
   | _ -> Array.of_list results
 
-let extract_from_json data filter default f =
-  let json = Yojson.Basic.from_string data |> to_list in
-  match json with [] -> default | hd :: _ -> member filter hd |> f
+let extract_from_json ?(key = "") data filter f =
+  let json = Yojson.Basic.from_string data in
+  match key with
+  | "" ->  member filter json |> f
+  | key -> let obj = Yojson.Basic.Util.(member key json) in
+  member filter obj |> f
 
-let api_call f endpoint default =
-  let url =
-    "https://financialmodelingprep.com/api/v3/" ^ endpoint ^ Secrets.api_key
+let api_call f endpoint symbol default =
+  let url = Printf.sprintf
+    "https://www.alphavantage.co/query?function=%s&symbol=%s&apikey=%s" endpoint symbol  Secrets.api_key 
   in
   let get () = Client.get (Uri.of_string url) in
-  compute ~time:5.0 ~f:get >>= function
+  compute ~time:8.0 ~f:get >>= function
   | `Timeout ->
       print_endline "Timeout";
       return default
@@ -47,86 +62,86 @@ let api_call f endpoint default =
       | 200 -> body |> Cohttp_lwt.Body.to_string >|= fun body -> f body
       | _ -> body |> Cohttp_lwt.Body.to_string >|= fun _ -> default)
 
-let update_price ticker_symbol =
-  let end_point = "quote-order/" ^ ticker_symbol ^ "?" in
+let get_market_cap_and_ep ticker_symbol =
+  let end_point = "OVERVIEW" in
   let f body =
-    let price = extract_from_json body "price" 0.0 to_float_exn in
-    let market_cap = extract_from_json body "marketCap" 0 to_int_exn in
-    let pe = extract_from_json body "pe" 0.0 to_float_exn in
-    (price, market_cap, pe)
+    let market_cap = extract_from_json body  "MarketCapitalization" to_int_exn in
+    let pe = extract_from_json body "TrailingPE"  to_float_exn in
+    (market_cap, pe)
   in
-  let price_data = Lwt_main.run (api_call f end_point (0.0, 0, 0.0)) in
-  Stocks_db.update_price ticker_symbol price_data
+  Lwt_main.run (api_call f end_point ticker_symbol (0, 0.0))
+
+let get_price ticker_symbol =
+  let end_point = "GLOBAL_QUOTE" in
+  let f body = extract_from_json ~key:"Global Quote" body "05. price" to_float_exn in
+    Lwt_main.run (api_call f end_point ticker_symbol (0.0)) 
+
+let update_price ticker_symbol =
+  let price = get_price ticker_symbol in
+  let cap, ep = get_market_cap_and_ep ticker_symbol in
+  Stocks_db.update_price ticker_symbol (price, cap, ep)
 
 let update_stock ticker_symbol =
-  let end_point = "profile/" ^ ticker_symbol ^ "?" in
+  let end_point = "OVERVIEW"  in
   let f body = body in
-  let data = Lwt_main.run (api_call f end_point "") in
-  let ticker_symbol_2 = extract_from_json data "symbol" "" to_string in
+  let data = Lwt_main.run (api_call f end_point ticker_symbol "") in
+  let ticker_symbol_2 = extract_from_json data "Symbol" to_string in
   let stock_exits = String.( = ) ticker_symbol ticker_symbol_2 in
   match stock_exits with
   | true ->
-      let price = extract_from_json data "price" 0.0 to_float_exn in
-      let beta = extract_from_json data "beta" 0.0 to_float_exn in
-      let market_cap = extract_from_json data "mktCap" 0 to_int_exn in
-      let currency = extract_from_json data "currency" "" to_string in
-      let industry = extract_from_json data "industry" "" to_string in
-      let sector = extract_from_json data "sector" "" to_string in
-      let country = extract_from_json data "country" "" to_string in
+      let price = get_price ticker_symbol in
+      let beta = extract_from_json data "Beta" to_float_exn in
+      let market_cap = extract_from_json data "MarketCapitalization" to_int_exn in
+      let currency = extract_from_json data "Currency"  to_string in
+      let industry = extract_from_json data "Industry" to_string in
+      let sector = extract_from_json data "Sector" to_string in
+      let country = extract_from_json data "Country" to_string in
       Stocks_db.update_stock ticker_symbol
         (price, beta, market_cap, currency, industry, sector, country, "TRUE")
   | false -> print_endline "Cant access stock"
-(* TODO: add manual *)
 
 let update_financials ticker_symbol =
   let f body = body in
-  let end_point = ticker_symbol ^ "?period=annual&" in
-  let income_end_point = "income-statement/" ^ end_point in
-  let balance_end_point = "balance-sheet-statement/" ^ end_point in
-  let cashflow_end_point = "cash-flow-statement/" ^ end_point in
-  let income_json = Lwt_main.run (api_call f income_end_point "") in
-  let balance_json = Lwt_main.run (api_call f balance_end_point "") in
-  let cashflow_json = Lwt_main.run (api_call f cashflow_end_point "") in
+  let income_end_point = "INCOME_STATEMENT" in
+  let balance_end_point = "BALANCE_SHEET" in
+  let cashflow_end_point = "CASH_FLOW" in
+  let income_json = Lwt_main.run (api_call f income_end_point ticker_symbol "") in
+  let balance_json = Lwt_main.run (api_call f balance_end_point ticker_symbol "") in
+  let cashflow_json = Lwt_main.run (api_call f cashflow_end_point ticker_symbol "") in
   let cash =
-    extract_from_json_list balance_json "cashAndCashEquivalents" 0 to_int_exn
+    extract_from_json_list ~key:"annualReports" balance_json "cashAndCashEquivalentsAtCarryingValue" 0 to_int_exn
   in
   let currency =
-    extract_from_json_list balance_json "reportedCurrency" "USD" to_string
+    extract_from_json_list ~key:"annualReports" balance_json "reportedCurrency" "USD" to_string
   in
   let assests =
-    extract_from_json_list balance_json "totalAssets" 0 to_int_exn
+    extract_from_json_list ~key:"annualReports" balance_json "totalAssets" 0 to_int_exn
   in
-  let debt = extract_from_json_list balance_json "totalDebt" 0 to_int_exn in
-  let year = extract_from_json_list income_json "calendarYear" "" to_string in
-  let period = extract_from_json_list income_json "period" "" to_string in
-  let revenue = extract_from_json_list income_json "revenue" 0 to_int_exn in
+  let debt = extract_from_json_list ~key:"annualReports" balance_json "currentDebt" 0 to_int_exn in
+  let year = extract_from_json_list ~key:"annualReports" income_json "fiscalDateEnding" "" to_string in
+  let revenue = extract_from_json_list ~key:"annualReports" income_json "totalRevenue" 0 to_int_exn in
   let net_income =
-    extract_from_json_list income_json "netIncome" 0 to_int_exn
+    extract_from_json_list ~key:"annualReports" income_json "netIncome" 0 to_int_exn
   in
-  let eps = extract_from_json_list income_json "eps" 0.0 to_float_exn in
-  let rnd =
-    extract_from_json_list income_json "researchAndDevelopmentExpenses" 0
-      to_int_exn
+  let cash_flow =
+    extract_from_json_list ~key:"annualReports" cashflow_json "operatingCashflow" 0 to_int_exn
   in
-  let free_cash_flow =
-    extract_from_json_list cashflow_json "freeCashFlow" 0 to_int_exn
-  in
+  let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income)in
   match Stocks_db.delete_financials ticker_symbol with
   | true ->
-      for i = 0 to Array.length cash - 1 do
+      for i = 0 to min_arr_length - 1 do
         Stocks_db.update_financials ticker_symbol
           ( year.(i),
-            period.(i),
+            "FY",
             revenue.(i),
             net_income.(i),
-            eps.(i),
-            rnd.(i),
             cash.(i),
             assests.(i),
             debt.(i),
-            free_cash_flow.(i),
+            cash_flow.(i),
             currency.(i) )
-      done
+      done;
+      print_endline "Financials updated";
   | false -> print_endline "something went wrong"
   
 
@@ -141,12 +156,12 @@ let update_forex () =
     | hd :: tl ->
       let end_point = "quote/" ^ hd ^ "EUR?" in
       let f body = body in
-      let data = Lwt_main.run (api_call f end_point "") in
+      let data = Lwt_main.run (api_call f end_point "" "") in
       let name =
-        extract_from_json data "name" "" to_string
+        extract_from_json data "name"  to_string
       in
       let price =
-        extract_from_json data "price" 0.0 to_float_exn
+        extract_from_json data "price" to_float_exn
       in 
       [(price, name)] @ loop tl
     | [] -> []
