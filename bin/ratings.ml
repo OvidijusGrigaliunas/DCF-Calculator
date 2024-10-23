@@ -12,8 +12,9 @@ let calc_debt_discount market_cap debt tax bond_rate =
   debt /. market_cap *. bond_rate *. (1.0 -. tax)
 
 let calc_growth ticker_symbol =
+  (* TODO check if desired time gap exists *) 
   let _, new_fcf, old_fcf, duration = List.find_exn first_last_financials ~f:(
-    fun (a, _, _, _) -> String.(=) a ticker_symbol)
+    fun (a, _, _, n) -> String.(=) a ticker_symbol && Float.(=) n 6.0)
   in
   let increase = (new_fcf -. old_fcf) /. (Float.abs old_fcf) +. 1.0  in
   increase **. (1.0 /. duration) -. 1.0

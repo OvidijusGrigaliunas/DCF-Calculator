@@ -147,8 +147,6 @@ let insert_ratings symbol base_rating target_rating =
         | code ->
           printf "%s error: " symbol;
           print_endline code)
-
-      
   
 let insert_country country =
   let exists = row_exists "Countries" "country" country in
@@ -407,29 +405,36 @@ let select_currencies () =
     |> String.concat)
 
 let select_first_and_last_fcf () =
-  let sql = "
+  let cashflow_window_10y = "
         WITH temp_table (symbol,year, free_cash_flow,n) 
         	AS (SELECT f.symbol, f.year, f.free_cash_flow, n
         	FROM (
         		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
         		FROM Financials
         	) AS f
-        	WHERE n <= 6)
-	
-        SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
+        	WHERE n <= 10)
+       "
+  in  
+  let n = [3; 5; 6; 8; 10] in
+  let n_year_max_min = List.map n ~f:(fun x ->  
+  Printf.sprintf " 
+		SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
         FROM (
         	SELECT symbol, free_cash_flow, n, max(year)
         	FROM 
-        	temp_table
+        	temp_table 
+			WHERE n <= %d
         	Group by symbol) a
         LEFT JOIN (
         	SELECT symbol, free_cash_flow, n, min(year) 
         	FROM 
         	temp_table
+			WHERE n <= %d
         	Group by symbol) b 
-      	ON b.symbol = a.symbol;
-       "
-  in  
+      	ON b.symbol = a.symbol
+      	" x x ^ (if not (Int.(=) x 10) then "Union" else ""))
+  in
+  let sql = cashflow_window_10y ^ String.concat n_year_max_min  ^  "ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
   let data = fetch_results stmt in
   let rec results data =
