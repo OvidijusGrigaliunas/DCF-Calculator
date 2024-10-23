@@ -364,12 +364,7 @@ let insert_forex names prices =
     | hd1 :: tl1 -> (
         match prices with
         | hd2 :: tl2 ->
-            let from, target =
-              match String.split hd1 ~on:'/' with
-              | x :: y :: _ -> (x, y)
-              | _ -> failwith "Forex name error"
-            in
-            Printf.sprintf "(\"%s\", \"%s\", %f), " from target hd2 ^ f tl1 tl2
+          Printf.sprintf "(\"%s\", \"%s\", %f), " hd1 "EUR" hd2 ^ f tl1 tl2
         | [] -> "")
     | [] -> ""
   in

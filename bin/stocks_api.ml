@@ -48,8 +48,13 @@ let extract_from_json ?(key = "") data filter f =
   member filter obj |> f
 
 let api_call f endpoint symbol default =
-  let url = Printf.sprintf
-    "https://www.alphavantage.co/query?function=%s&symbol=%s&apikey=%s" endpoint symbol  Secrets.api_key 
+  let api_function = Printf.sprintf
+    "https://www.alphavantage.co/query?function=%s" endpoint
+  in
+  let url =
+    match symbol with 
+    | "" -> Printf.sprintf "%s&apikey=%s" api_function Secrets.api_key
+    | _ -> Printf.sprintf "%s&symbol=%s&apikey=%s" api_function symbol Secrets.api_key
   in
   let get () = Client.get (Uri.of_string url) in
   compute ~time:8.0 ~f:get >>= function
@@ -154,15 +159,15 @@ let update_forex () =
   let rec loop currencies =
     match currencies with
     | hd :: tl ->
-      let end_point = "quote/" ^ hd ^ "EUR?" in
+      let end_point = Printf.sprintf "CURRENCY_EXCHANGE_RATE&from_currency=%s&to_currency=EUR" hd in
       let f body = body in
       let data = Lwt_main.run (api_call f end_point "" "") in
       let name =
-        extract_from_json data "name"  to_string
+        extract_from_json ~key:"Realtime Currency Exchange Rate" data "1. From_Currency Code" to_string
       in
       let price =
-        extract_from_json data "price" to_float_exn
-      in 
+        extract_from_json ~key:"Realtime Currency Exchange Rate" data "5. Exchange Rate" to_float_exn
+      in     
       [(price, name)] @ loop tl
     | [] -> []
   in
