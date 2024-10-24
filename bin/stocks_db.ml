@@ -273,36 +273,29 @@ let update_price ticker (price, market_cap, pe) =
 
 let select_ratings_data () =
   let sql =
-    Printf.sprintf
-      "\n\
-      \    SELECT\n\
-      \      s.symbol as ss, s.industry, s.sector, s.market_cap * s.ratio,\n\
-      \      s.pe, s.price * s.ratio, f.total_debt * \
-       f.ratio,\n\
-      \      f.free_cash_flow * f.ratio, c.tax, \
-       c.bonds_rate,
-       s.status, s.target,\n\
-       MAX(f.year) as ye
-       \    FROM (\n\
-       \t\tSELECT Stocks.*, CASE WHEN Stocks.currency = \"EUR\" OR \
-       Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio\n\
-       \t\tFROM Stocks\n\
-       \t\tLEFT JOIN Currencies\n\
-       \t\tON Stocks.currency = Currencies.currency ) \n\
-       \t\tAS s\n\
-      \    LEFT JOIN (\n\
-       \t\tSELECT Financials.*, CASE WHEN Financials.currency = \"EUR\" OR \
-       Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio\n\
-       \t\tFROM Financials \n\
-       \t\tLEFT JOIN Currencies\n\
-       \t\tON Financials.currency = Currencies.currency) \n\
-       \t\tAS f\n\
-      \    ON f.symbol = s.symbol\n\
-      \    LEFT JOIN Countries AS c\n\
-      \    on s.country = c.country\n\
-      \    GROUP BY s.symbol\n\
-      \    ORDER BY s.symbol ASC, f.year DESC;\n\
-      \    "
+    Printf.sprintf "
+    SELECT
+      s.symbol as ss, s.industry, s.sector, s.market_cap * s.ratio,
+      s.pe, s.price * s.ratio, f.total_debt * f.ratio,
+      c.tax, c.bonds_rate, s.status, s.target, MAX(f.year) as ye
+    FROM (
+		SELECT Stocks.*, CASE WHEN Stocks.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
+		FROM Stocks
+		LEFT JOIN Currencies
+		ON Stocks.currency = Currencies.currency ) 
+		AS s
+    LEFT JOIN (
+		SELECT Financials.*, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
+		FROM Financials 
+		LEFT JOIN Currencies
+		ON Financials.currency = Currencies.currency) 
+		AS f
+    ON f.symbol = s.symbol
+    LEFT JOIN Countries AS c
+    on s.country = c.country
+    GROUP BY s.symbol
+    ORDER BY s.symbol ASC, f.year DESC;
+    "
   in
   let stmt = Sqlite3.prepare db sql in
   let sql_data = fetch_results stmt in
@@ -311,7 +304,7 @@ let select_ratings_data () =
     | hd :: tl -> (
         match hd with
         | tick_symbol :: industry :: sector :: market_cap :: pe :: price
-          :: debt :: free_cash_flow :: tax 
+          :: debt :: tax 
           :: bond_rate :: status :: target :: _ ->
             [
               ( Sqlite3.Data.to_string_exn tick_symbol,
@@ -321,7 +314,6 @@ let select_ratings_data () =
                 Sqlite3.Data.to_float_exn pe,
                 Sqlite3.Data.to_float_exn price,
                 Sqlite3.Data.to_float_exn debt,
-                Sqlite3.Data.to_float_exn free_cash_flow,
                 Sqlite3.Data.to_float_exn tax,
                 Sqlite3.Data.to_float_exn bond_rate, 
                 Sqlite3.Data.to_string_exn status,
@@ -406,13 +398,33 @@ let select_currencies () =
 
 let select_first_and_last_fcf () =
   let cashflow_window_10y = "
-        WITH temp_table (symbol,year, free_cash_flow,n) 
-        	AS (SELECT f.symbol, f.year, f.free_cash_flow, n
-        	FROM (
-        		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
-        		FROM Financials
-        	) AS f
-        	WHERE n <= 10)
+    WITH T AS (
+      SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
+        substr(f.year, 1, 4) as year, f.symbol, f.free_cash_flow
+      FROM Financials f
+    ),
+    sum_of_quarters AS (
+    	SELECT DISTINCT *
+    	FROM (SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
+    	FROM T
+    	GROUP BY year, symbol
+    	HAVING count(rank) = 4
+    	UNION
+    	SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
+    	FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
+    		FROM T
+    	)
+    	WHERE n <= 4
+    	Group by symbol)
+    ),
+    temp_table AS (
+    SELECT f.symbol, f.year, f.free_cash_flow, n
+    	FROM (
+    		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
+    		FROM sum_of_quarters
+    	) AS f
+    	WHERE n <= 10 
+    )
        "
   in  
   let n = [3; 5; 6; 8; 10] in
@@ -446,7 +458,9 @@ let select_first_and_last_fcf () =
               ( Sqlite3.Data.to_string_exn tick_symbol,
                 Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int,
                 Sqlite3.Data.to_int_exn old_free_cash_flow |> Float.of_int,
-                Sqlite3.Data.to_int_exn duration |> Float.of_int);
+                Sqlite3.Data.to_int_exn duration |> Float.of_int
+                (* TODO duration set to max of n if duration is maller *)
+                );
             ]
             @ results tl
         | _ -> [])

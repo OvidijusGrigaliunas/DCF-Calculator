@@ -11,20 +11,18 @@ let calc_eq_discount ?(expected_return = 0.15) pe market_cap debt =
 let calc_debt_discount market_cap debt tax bond_rate =
   debt /. market_cap *. bond_rate *. (1.0 -. tax)
 
-let calc_growth ticker_symbol =
-  (* TODO check if desired time gap exists *) 
-  let _, new_fcf, old_fcf, duration = List.find_exn first_last_financials ~f:(
-    fun (a, _, _, n) -> String.(=) a ticker_symbol && Float.(=) n 6.0)
-  in
-  let increase = (new_fcf -. old_fcf) /. (Float.abs old_fcf) +. 1.0  in
-  increase **. (1.0 /. duration) -. 1.0
+let calc_growth new_fcf old_fcf duration =
+  let old_fcf = if Float.(>) old_fcf 0.0 then old_fcf else new_fcf /. 1.5 in 
+  let increase = new_fcf /. old_fcf in
+  let growth = increase **. (1.0 /. (duration -. 1.0)) -. 1.0 in
+  if Float.(<=) growth 0.0 then 0.005 else growth 
   
 let get_industry_rating industry sector =
   let industry_risk, sector_risk =
     Stocks_db.select_sector_and_industry sector industry
   in
   let industry_and_sector_risk =
-    (industry_risk +. sector_risk) /. 6.0 +. 0.84
+    (industry_risk +. sector_risk) /. 20.0 +. 0.95
   in
   industry_and_sector_risk 
 
@@ -138,24 +136,26 @@ let rate_stocks ?(filter = "none") stock_data =
               pe,
               price,
               debt,
-              free_cash_flow,
               tax,
               bond_rate,
               status,
               target ) =
           hd
         in
+        (* TODO check if desired time gap exists *) 
+        let _, new_fcf, old_fcf, duration = List.find_exn first_last_financials ~f:(
+          fun (a, _, _, n) -> String.(=) a tick_symbol && Float.(=) n 6.0)
+        in
         let industry_rating = get_industry_rating industry sector in
         let discount =
           calc_discount market_cap pe debt tax bond_rate industry_rating 
         in
-        let growth = calc_growth tick_symbol in
+        let growth = calc_growth new_fcf old_fcf duration in
         let intrinsic_value =
-          calc_intrinsic_value pe free_cash_flow growth discount
+          calc_intrinsic_value pe new_fcf growth discount
         in
         let upside = calc_upside market_cap pe intrinsic_value in
         let intrinsic_price = get_intrinsic_price price upside in
-        
         let rating, target_rating = rate_stock_price intrinsic_price price target in
         Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =

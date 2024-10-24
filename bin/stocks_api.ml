@@ -16,7 +16,7 @@ let to_int_exn = function
   | `String s ->
     (match s with
       | "None" -> 0
-      | _ -> Int.of_string s)
+      | _ -> Float.of_string s |> Int.of_float)
   | `Int i -> i
   | _ -> failwith "Expected float or int"
 
@@ -113,31 +113,47 @@ let update_financials ticker_symbol =
   let income_json = Lwt_main.run (api_call f income_end_point ticker_symbol "") in
   let balance_json = Lwt_main.run (api_call f balance_end_point ticker_symbol "") in
   let cashflow_json = Lwt_main.run (api_call f cashflow_end_point ticker_symbol "") in
-  let cash =
-    extract_from_json_list ~key:"annualReports" balance_json "cashAndCashEquivalentsAtCarryingValue" 0 to_int_exn
+  let extract_data key =
+    let cash =
+      extract_from_json_list ~key:key balance_json "cashAndCashEquivalentsAtCarryingValue" 0 to_int_exn
+    in
+    let currency =
+      extract_from_json_list ~key:key balance_json "reportedCurrency" "USD" to_string
+    in
+    let assests =
+      extract_from_json_list ~key:key balance_json "totalAssets" 0 to_int_exn
+    in
+    let debt = extract_from_json_list ~key:key balance_json "currentDebt" 0 to_int_exn in
+    let year = extract_from_json_list ~key:key income_json "fiscalDateEnding" "" to_string in
+    let revenue = extract_from_json_list ~key:key income_json "totalRevenue" 0 to_int_exn in
+    let net_income =
+      extract_from_json_list ~key:key income_json "netIncome" 0 to_int_exn
+    in
+    let cash_flow =
+      extract_from_json_list ~key:key cashflow_json "operatingCashflow" 0 to_int_exn
+    in
+    let time = match key with
+      | "annualReports" -> "FY"
+      | _ -> "FQ"
+    in 
+      ( year,
+        time,
+        revenue,
+        net_income,
+        cash,
+        assests,
+        debt,
+        cash_flow,
+        currency)
   in
-  let currency =
-    extract_from_json_list ~key:"annualReports" balance_json "reportedCurrency" "USD" to_string
-  in
-  let assests =
-    extract_from_json_list ~key:"annualReports" balance_json "totalAssets" 0 to_int_exn
-  in
-  let debt = extract_from_json_list ~key:"annualReports" balance_json "currentDebt" 0 to_int_exn in
-  let year = extract_from_json_list ~key:"annualReports" income_json "fiscalDateEnding" "" to_string in
-  let revenue = extract_from_json_list ~key:"annualReports" income_json "totalRevenue" 0 to_int_exn in
-  let net_income =
-    extract_from_json_list ~key:"annualReports" income_json "netIncome" 0 to_int_exn
-  in
-  let cash_flow =
-    extract_from_json_list ~key:"annualReports" cashflow_json "operatingCashflow" 0 to_int_exn
-  in
-  let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income)in
+  let year, time, revenue, net_income, cash, assests, debt, cash_flow, currency = extract_data "quarterlyReports" in
+  let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income) in
   match Stocks_db.delete_financials ticker_symbol with
   | true ->
       for i = 0 to min_arr_length - 1 do
         Stocks_db.update_financials ticker_symbol
           ( year.(i),
-            "FY",
+            time,
             revenue.(i),
             net_income.(i),
             cash.(i),
