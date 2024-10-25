@@ -397,35 +397,63 @@ let select_currencies () =
     |> String.concat)
 
 let select_first_and_last_fcf () =
+  (* TODO: Use quarters only for ttm cashflow, otherwise it won't be 1 to 1 on yearly reports *)
   let cashflow_window_10y = "
-    WITH T AS (
-      SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
-        substr(f.year, 1, 4) as year, f.symbol, f.free_cash_flow
-      FROM Financials f
-    ),
-    sum_of_quarters AS (
-    	SELECT DISTINCT *
-    	FROM (SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
-    	FROM T
-    	GROUP BY year, symbol
-    	HAVING count(rank) = 4
-    	UNION
-    	SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
-    	FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
-    		FROM T
-    	)
-    	WHERE n <= 4
-    	Group by symbol)
-    ),
-    temp_table AS (
-    SELECT f.symbol, f.year, f.free_cash_flow, n
-    	FROM (
-    		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
-    		FROM sum_of_quarters
-    	) AS f
-    	WHERE n <= 10 
-    )
-       "
+      WITH A AS (
+        SELECT *
+        FROM (
+      	SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
+          substr(f.year, 1, 4) as year, 
+      	f.symbol, 
+      	f.free_cash_flow, 
+      	min(substr(f.year, 1, 4)) over (PARTITION BY f.symbol) as min_year
+      	FROM Financials f)
+        WHERE not min_year = year
+      ),
+      count_reports_per_year AS (
+      	SELECT symbol, year, COUNT(Rank) as reports, 
+      	LAG(COUNT(Rank)) OVER (PARTITION BY symbol ORDER BY symbol, year) as prev_year_report_n
+      	FROM A
+      	GROUP BY year, symbol
+      ),
+      T AS (
+        SELECT A.*, c.reports, c.prev_year_report_n
+        FROM A
+        INNER JOIN count_reports_per_year c
+      	on A.year = c.year AND A.symbol = c.symbol
+      ),
+      sum_of_q AS (
+      	SELECT symbol, year, free_cash_flow
+      	FROM (
+      		SELECT symbol, year, sum(free_cash_flow) as free_cash_flow, max(year) OVER (PARTITION BY symbol) as b
+      		FROM T
+      		GROUP BY year, symbol
+      		ORDER BY symbol, year DESC)
+      	WHERE NOT year = b
+      	UNION
+      	SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
+      	FROM (
+      		SELECT l.year, l.symbol, l.free_cash_flow, k.prev_year_report_n, ROW_NUMBER() OVER (PARTITION BY l.symbol ORDER BY l.year DESC) AS n
+      			FROM T as l
+      		LEFT JOIN (
+      			SELECT max(year) as year, symbol, prev_year_report_n
+      			FROM T
+      			GROUP BY Symbol) as k
+      		ON k.symbol = l.symbol 
+      	)
+      	WHERE n <= prev_year_report_n
+      	Group by symbol
+      	ORDER BY symbol, year DESC
+
+      ),  
+      temp_table AS (
+      SELECT f.symbol, f.year, f.free_cash_flow, n
+      	FROM (
+      		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
+      		FROM sum_of_q
+      	) AS f
+      )
+    "
   in  
   let n = [3; 5; 6; 8; 10] in
   let n_year_max_min = List.map n ~f:(fun x ->  
