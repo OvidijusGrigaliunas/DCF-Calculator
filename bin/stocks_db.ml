@@ -348,8 +348,27 @@ let update_speculations symbol growth return moat =
       | code -> printf "Update failed: error %s" code)
   | code -> print_endline code
 
+let clean_up_financials_currency () =
+  let sql = "
+    WITH cur AS (
+    	Select symbol, currency from Financials where symbol IN
+    		(Select symbol from Financials where currency = \"None\") 
+    		AND NOT currency =\"None\"
+    	GROUP by symbol
+    )
+    UPDATE Financials
+    SET currency = cur.currency
+    FROM cur
+    WHERE Financials.symbol = cur.symbol
+    "
+  in
+  let cleaned_up = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match cleaned_up with
+  | "OK" -> ()
+  | code -> printf "Failed forex cleanup: error %s" code
+
 let insert_forex names prices =
-  let rec f names prices =
+    let rec f names prices =
     match names with
     | hd1 :: tl1 -> (
         match prices with
@@ -400,14 +419,20 @@ let select_first_and_last_fcf () =
   (* TODO: Use quarters only for ttm cashflow, otherwise it won't be 1 to 1 on yearly reports *)
   let cashflow_window_10y = "
       WITH A AS (
-        SELECT *
+        SELECT Rank, f.year, f.symbol, CAST(f.free_cash_flow * 1.0 * ratio AS INT) as free_cash_flow, min_year
         FROM (
       	SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
           substr(f.year, 1, 4) as year, 
       	f.symbol, 
       	f.free_cash_flow, 
       	min(substr(f.year, 1, 4)) over (PARTITION BY f.symbol) as min_year
-      	FROM Financials f)
+      	FROM Financials f) f
+        LEFT JOIN (
+      	SELECT DISTINCT Financials.symbol, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
+      	FROM Financials 
+      	LEFT JOIN Currencies
+      	ON Financials.currency = Currencies.currency) b
+      	ON f.symbol = b.symbol
         WHERE not min_year = year
       ),
       count_reports_per_year AS (
@@ -455,7 +480,7 @@ let select_first_and_last_fcf () =
       )
     "
   in  
-  let n = [3; 5; 6; 8; 10] in
+  let n = [2; 3; 4; 5; 6; 8] in
   let n_year_max_min = List.map n ~f:(fun x ->  
   Printf.sprintf " 
 		SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
@@ -472,9 +497,9 @@ let select_first_and_last_fcf () =
 			WHERE n <= %d
         	Group by symbol) b 
       	ON b.symbol = a.symbol
-      	" x x ^ (if not (Int.(=) x 10) then "Union" else ""))
+      	" x x ^ (if not (Int.(=) x 8) then "Union" else ""))
   in
-  let sql = cashflow_window_10y ^ String.concat n_year_max_min  ^  "ORDER BY a.symbol ASC, b.n ASC;" in
+  let sql = cashflow_window_10y ^ String.concat n_year_max_min  ^  " ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
   let data = fetch_results stmt in
   let rec results data =
@@ -487,7 +512,6 @@ let select_first_and_last_fcf () =
                 Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int,
                 Sqlite3.Data.to_int_exn old_free_cash_flow |> Float.of_int,
                 Sqlite3.Data.to_int_exn duration |> Float.of_int
-                (* TODO duration set to max of n if duration is maller *)
                 );
             ]
             @ results tl

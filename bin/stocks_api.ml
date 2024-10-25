@@ -169,12 +169,15 @@ let update_financials ticker_symbol =
 let update_all_prices () =
   let symbols = Stocks_db.select_stocks_symbols () in
   List.iter symbols ~f:(fun symbol -> update_price symbol)
-
+  
 let update_forex () =
+  Stocks_db.clean_up_financials_currency ();
   let currencies = Stocks_db.select_currencies () in
   let rec loop currencies =
     match currencies with
+    | "None" :: tl -> [] @ loop tl
     | hd :: tl ->
+      print_endline hd;
       let end_point = Printf.sprintf "CURRENCY_EXCHANGE_RATE&from_currency=%s&to_currency=EUR" hd in
       let f body = body in
       let data = Lwt_main.run (api_call f end_point "" "") in

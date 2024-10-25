@@ -143,8 +143,10 @@ let rate_stocks ?(filter = "none") stock_data =
           hd
         in
         (* TODO check if desired time gap exists *) 
+        let filtered_fl_financials = List.filter first_last_financials ~f:(fun (a, _, _, _) -> String.(=) a tick_symbol) in
+        let max_period = List.map filtered_fl_financials ~f:(fun (_, _, _, d) -> d) |> List.fold ~init:Float.min_value ~f:Float.max in
         let _, new_fcf, old_fcf, duration = List.find_exn first_last_financials ~f:(
-          fun (a, _, _, n) -> String.(=) a tick_symbol && Float.(=) n 6.0)
+          fun (a, _, _, n) -> String.(=) a tick_symbol && Float.(=) n max_period)
         in
         let industry_rating = get_industry_rating industry sector in
         let discount =
