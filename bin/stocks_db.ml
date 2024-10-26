@@ -197,7 +197,6 @@ let update_stock ticker
       match inserted with
       | "OK" -> printf "%s was succesfuly pulled\n" ticker
       | code -> 
-      print_endline sql;
         print_endline code)
   | true -> (
       let sql =
@@ -227,26 +226,31 @@ let delete_financials ticker =
   let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
   match deleted with "OK" -> true | _ -> false
 
-let update_financials ticker
-    ( year,
-      period,
-      revenue,
-      net_income,
-      cash,
-      assests,
-      debt,
-      free_cash_flow,
-      currency ) =
-  let sql =
-    Printf.sprintf
-      "INSERT INTO Financials (symbol, year, period, net_income, free_cash_flow,\n\
-      \                             revenue, cash, \
-       total_assests, total_debt, currency)\n\
-      \      VALUES (\"%s\",\"%s\",\"%s\",%i, %i, %i, %i, %i, %i, \
-       \"%s\");"
-      ticker year period net_income free_cash_flow revenue cash assests
-      debt currency
+let update_financials ticker financials =
+  let rec gen_sql financials =
+    match financials with
+    | (year, period, net_income, free_cash_flow, revenue, cash, assests, debt, currency) :: tl ->
+      let sql_values = Printf.sprintf "
+        (\"%s\",\"%s\",\"%s\",%i, %i, %i, %i, %i, %i, \"%s\") "
+        ticker year period net_income free_cash_flow revenue cash assests debt currency
+      in     
+      let line =
+        match tl with
+        | [] -> sql_values
+        | _ -> sql_values ^ ","
+      in 
+      String.append line (gen_sql tl)
+       
+    | [] -> ""
   in
+  let base_sql = 
+     "INSERT INTO Financials (symbol, year, period, net_income, free_cash_flow,\n\
+      \                             revenue, cash, \
+       total_assests, total_debt, currency)\n
+       VALUES 
+       "
+  in
+  let sql = base_sql ^ gen_sql financials in
   let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
   match inserted with
   | "OK" -> ()
@@ -279,17 +283,18 @@ let select_ratings_data () =
       s.pe, s.price * s.ratio, f.total_debt * f.ratio,
       c.tax, c.bonds_rate, s.status, s.target, MAX(f.year) as ye
     FROM (
-		SELECT Stocks.*, CASE WHEN Stocks.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
-		FROM Stocks
-		LEFT JOIN Currencies
-		ON Stocks.currency = Currencies.currency ) 
+  		SELECT Stocks.*, CASE WHEN Stocks.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
+  		FROM Stocks
+  		LEFT JOIN Currencies
+  		ON Stocks.currency = Currencies.currency ) 
 		AS s
     LEFT JOIN (
-		SELECT Financials.*, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
-		FROM Financials 
-		LEFT JOIN Currencies
-		ON Financials.currency = Currencies.currency) 
-		AS f
+  		SELECT Financials.*, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
+  		FROM Financials 
+  		LEFT JOIN Currencies
+  		ON Financials.currency = Currencies.currency
+  		WHERE period = \"FQ\") 
+  		AS f
     ON f.symbol = s.symbol
     LEFT JOIN Countries AS c
     on s.country = c.country
@@ -416,22 +421,23 @@ let select_currencies () =
     |> String.concat)
 
 let select_first_and_last_fcf () =
-  (* TODO: Use quarters only for ttm cashflow, otherwise it won't be 1 to 1 on yearly reports *)
-  let cashflow_window_10y = "
-      WITH A AS (
-        SELECT Rank, f.year, f.symbol, CAST(f.free_cash_flow * 1.0 * ratio AS INT) as free_cash_flow, min_year
+      let cashflow_window_10y = 
+      "WITH A AS (
+       SELECT Rank, f.year, f.symbol, CAST(f.free_cash_flow * 1.0 * ratio AS INT) as free_cash_flow, min_year
         FROM (
       	SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
           substr(f.year, 1, 4) as year, 
       	f.symbol, 
       	f.free_cash_flow, 
       	min(substr(f.year, 1, 4)) over (PARTITION BY f.symbol) as min_year
-      	FROM Financials f) f
+      	FROM Financials f
+      	WHERE period = \"FQ\") f
         LEFT JOIN (
       	SELECT DISTINCT Financials.symbol, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
       	FROM Financials 
       	LEFT JOIN Currencies
-      	ON Financials.currency = Currencies.currency) b
+      	ON Financials.currency = Currencies.currency
+      	WHERE period = \"FQ\") b
       	ON f.symbol = b.symbol
         WHERE not min_year = year
       ),
@@ -450,11 +456,11 @@ let select_first_and_last_fcf () =
       sum_of_q AS (
       	SELECT symbol, year, free_cash_flow
       	FROM (
-      		SELECT symbol, year, sum(free_cash_flow) as free_cash_flow, max(year) OVER (PARTITION BY symbol) as b
-      		FROM T
+      		SELECT symbol, substr(f.year, 1, 4) as year, sum(free_cash_flow) as free_cash_flow
+      		FROM Financials f
+      		WHERE period = \"FY\"
       		GROUP BY year, symbol
       		ORDER BY symbol, year DESC)
-      	WHERE NOT year = b
       	UNION
       	SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
       	FROM (
@@ -469,7 +475,7 @@ let select_first_and_last_fcf () =
       	WHERE n <= prev_year_report_n
       	Group by symbol
       	ORDER BY symbol, year DESC
-
+	
       ),  
       temp_table AS (
       SELECT f.symbol, f.year, f.free_cash_flow, n
@@ -480,7 +486,7 @@ let select_first_and_last_fcf () =
       )
     "
   in  
-  let n = [2; 3; 4; 5; 6; 8] in
+  let n = [2; 3; 4; 5; 6] in
   let n_year_max_min = List.map n ~f:(fun x ->  
   Printf.sprintf " 
 		SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
@@ -497,7 +503,7 @@ let select_first_and_last_fcf () =
 			WHERE n <= %d
         	Group by symbol) b 
       	ON b.symbol = a.symbol
-      	" x x ^ (if not (Int.(=) x 8) then "Union" else ""))
+      	" x x ^ (if not (Int.(=) x 6) then "Union" else ""))
   in
   let sql = cashflow_window_10y ^ String.concat n_year_max_min  ^  " ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
@@ -524,8 +530,9 @@ let delete_stock ticker_symbol =
   let sql = Printf.sprintf "
     DELETE FROM Stocks WHERE symbol = \"%s\";
     DELETE FROM Financials WHERE symbol = \"%s\";
+    DELETE FROM Ratings WHERE symbol = \"%s\";
     DELETE FROM Speculative_data WHERE symbol = \"%s\";
-    " ticker_symbol ticker_symbol ticker_symbol
+    " ticker_symbol ticker_symbol ticker_symbol ticker_symbol
   in
   let deleted =
     Sqlite3.exec db sql |> Sqlite3.Rc.to_string

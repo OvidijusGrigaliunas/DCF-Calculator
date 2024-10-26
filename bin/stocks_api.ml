@@ -105,15 +105,7 @@ let update_stock ticker_symbol =
         (price, beta, market_cap, currency, industry, sector, country, "TRUE")
   | false -> print_endline "Cant access stock"
 
-let update_financials ticker_symbol =
-  let f body = body in
-  let income_end_point = "INCOME_STATEMENT" in
-  let balance_end_point = "BALANCE_SHEET" in
-  let cashflow_end_point = "CASH_FLOW" in
-  let income_json = Lwt_main.run (api_call f income_end_point ticker_symbol "") in
-  let balance_json = Lwt_main.run (api_call f balance_end_point ticker_symbol "") in
-  let cashflow_json = Lwt_main.run (api_call f cashflow_end_point ticker_symbol "") in
-  let extract_data key =
+let extract_data_fin key (income_json, balance_json, cashflow_json) =
     let cash =
       extract_from_json_list ~key:key balance_json "cashAndCashEquivalentsAtCarryingValue" 0 to_int_exn
     in
@@ -136,39 +128,47 @@ let update_financials ticker_symbol =
       | "annualReports" -> "FY"
       | _ -> "FQ"
     in 
-      ( year,
-        time,
-        revenue,
-        net_income,
-        cash,
-        assests,
-        debt,
-        cash_flow,
-        currency)
-  in
-  let year, time, revenue, net_income, cash, assests, debt, cash_flow, currency = extract_data "quarterlyReports" in
-  let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income) in
+    let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income) in
+    let rec loop i max_i =
+      if max_i > i then (
+         let financial = (year.(i),
+            time,
+            net_income.(i),
+            cash_flow.(i),
+            revenue.(i),
+            cash.(i),
+            assests.(i), 
+            debt.(i),
+            currency.(i)) in
+          [financial] @ loop (i + 1) max_i
+          )
+        else []
+    in
+    loop 0 min_arr_length
+  
+let get_financials ticker_symbol =
+  let f body = body in
+  let income_end_point = "INCOME_STATEMENT" in
+  let balance_end_point = "BALANCE_SHEET" in
+  let cashflow_end_point = "CASH_FLOW" in
+  let income_json = Lwt_main.run (api_call f income_end_point ticker_symbol "") in
+  let balance_json = Lwt_main.run (api_call f balance_end_point ticker_symbol "") in
+  let cashflow_json = Lwt_main.run (api_call f cashflow_end_point ticker_symbol "") in
+  (income_json, balance_json, cashflow_json)
+
+let update_financials ticker_symbol =
+  let financals_data_qrt = get_financials ticker_symbol |> extract_data_fin "quarterlyReports" in
+  let financals_data_yearly = get_financials ticker_symbol |> extract_data_fin "annualReports" in
   match Stocks_db.delete_financials ticker_symbol with
   | true ->
-      for i = 0 to min_arr_length - 1 do
-        Stocks_db.update_financials ticker_symbol
-          ( year.(i),
-            time,
-            revenue.(i),
-            net_income.(i),
-            cash.(i),
-            assests.(i),
-            debt.(i),
-            cash_flow.(i),
-            currency.(i) )
-      done;
-      print_endline "Financials updated";
+    Stocks_db.update_financials ticker_symbol (List.append financals_data_qrt financals_data_yearly);
+    print_endline "Financials updated";
   | false -> print_endline "something went wrong"
   
 
 let update_all_prices () =
   let symbols = Stocks_db.select_stocks_symbols () in
-  List.iter symbols ~f:(fun symbol -> update_price symbol)
+  List.iter symbols ~f:(fun symbol -> update_price symbol; Thread.delay 0.4)
   
 let update_forex () =
   Stocks_db.clean_up_financials_currency ();
@@ -199,5 +199,6 @@ let update_data () =
   let symbols = Stocks_db.select_stocks_symbols () in
   List.iter symbols ~f:(fun symbol ->
       update_financials symbol;
-      update_price symbol);
+      update_price symbol;
+      Thread.delay 0.2);
   update_forex ()
