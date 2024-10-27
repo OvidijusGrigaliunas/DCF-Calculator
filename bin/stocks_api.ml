@@ -206,7 +206,7 @@ let update_all_prices () =
      Stdio.Out_channel.flush stdout;
      update_price symbol;
      Thread.delay 0.4);
-  printf "\r";
+  printf "\r\n";
   Stdio.Out_channel.flush stdout
   
 let update_forex () =
@@ -243,6 +243,6 @@ let update_data () =
       update_price symbol;
       Thread.delay 0.5
       );
-  printf "\r";
+  printf "\r\n";
   Stdio.Out_channel.flush stdout;
   update_forex ()

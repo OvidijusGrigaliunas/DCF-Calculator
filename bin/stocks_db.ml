@@ -323,7 +323,7 @@ let select_ratings_data () =
                 Sqlite3.Data.to_float_exn tax,
                 Sqlite3.Data.to_float_exn bond_rate, 
                 Sqlite3.Data.to_string_exn status,
-                Sqlite3.Data.to_int_exn target,
+                Sqlite3.Data.to_float_exn target,
                 Sqlite3.Data.to_float_exn div_yield
                 );
             ]
@@ -566,11 +566,12 @@ let select_first_and_last_fcf () =
 
 let delete_stock ticker_symbol =
   let sql = Printf.sprintf "
-    DELETE FROM Stocks WHERE symbol = \"%s\";
     DELETE FROM Financials WHERE symbol = \"%s\";
     DELETE FROM Ratings WHERE symbol = \"%s\";
     DELETE FROM Speculative_data WHERE symbol = \"%s\";
-    " ticker_symbol ticker_symbol ticker_symbol ticker_symbol
+    DELETE FROM Earnings WHERE symbol = \"%s\";
+    DELETE FROM Stocks WHERE symbol = \"%s\";
+    " ticker_symbol ticker_symbol ticker_symbol ticker_symbol ticker_symbol
   in
   let deleted =
     Sqlite3.exec db sql |> Sqlite3.Rc.to_string
@@ -695,3 +696,66 @@ let select_eps_growth () =
   in
   results data
 
+let update_targets () =
+  let sql = "
+    WITH sec_median AS (
+    	SELECT sector, AVG(base_rating) AS median
+    	FROM
+    	(
+    	   SELECT r.symbol, base_rating, s.sector,
+    		  ROW_NUMBER() OVER (Partition by s.sector ORDER BY base_rating ASC, r.symbol ASC) AS RowAsc,
+    		  ROW_NUMBER() OVER (Partition by s.sector ORDER BY base_rating DESC, r.symbol DESC) AS RowDesc
+    	   FROM Ratings r
+    	   LEFT JOIN Stocks s
+    		ON r.symbol = s.symbol
+    	) data
+    	WHERE
+    	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
+    	   GROUP BY sector
+    ),
+    ind_median AS (
+    	SELECT industry, AVG(base_rating) AS median
+    	FROM
+    	(
+    	   SELECT r.symbol, base_rating, s.industry,
+    		  ROW_NUMBER() OVER (Partition by s.industry ORDER BY base_rating ASC, r.symbol ASC) AS RowAsc,
+    		  ROW_NUMBER() OVER (Partition by s.industry ORDER BY base_rating DESC, r.symbol DESC) AS RowDesc
+    	   FROM Ratings r
+    	   LEFT JOIN Stocks s
+    		ON r.symbol = s.symbol
+    	) data
+    	WHERE
+    	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
+    	   GROUP BY industry
+    ),
+    median AS (
+    	SELECT  AVG(base_rating) AS median
+    	FROM
+    	(
+    	   SELECT base_rating,
+    		  ROW_NUMBER() OVER (ORDER BY base_rating ASC) AS RowAsc,
+    		  ROW_NUMBER() OVER (ORDER BY base_rating DESC) AS RowDesc
+    	   FROM Ratings r
+    	) 
+    	WHERE
+    	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
+    ),
+    new_targets AS (
+    	SELECT r.symbol, round(r.base_rating * 0.6 + sm.median * 0.08 + im.median * 0.12 + m.median * 0.05 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
+    	FROM Ratings r
+    	LEFT JOIN Stocks s
+    		ON r.symbol = s.symbol
+    	LEFT JOIN ind_median im
+    		ON im.industry = s.industry
+    	LEFT JOIN sec_median sm
+    		ON sm.sector = s.sector
+    	LEFT JOIN median m
+    )
+    UPDATE Stocks
+    SET target = (
+    	SELECT med_target
+    	FROM new_targets
+    	WHERE STOCKS.symbol = new_targets.symbol);
+       "
+  in
+  Sqlite3.exec db sql |> Sqlite3.Rc.to_string

@@ -76,7 +76,7 @@ let get_intrinsic_price price upside pl_value =
 
 let rate_stock_price intrinsic_price current_price target =
   let rating = current_price /. intrinsic_price in
-  let target_rating = rating /. (Float.of_int target) *. 100.0 in
+  let target_rating = rating /. target in
   (rating, target_rating)
 
 let print_price_rating ratings =
@@ -101,14 +101,18 @@ let print_price_rating ratings =
         printf "| %*s" (-6) ticker_symbol;
         if Float.(<) price 10.0 then
           printf "C: %*.3f€ " (5) (price)
-        else
-          printf "C: %*.1f€ " (5) (price);
+        else if Float.(<) price 1000.0 then 
+          printf "C: %*.1f€ " (5) (price)
+        else 
+          printf "C: %*.0f€ " (5) (price);
         printf "T:";
         printf "%*.0f%% " (4) (discount *. 100.0);
         if Float.(<) (price/.discount) 10.0 then
           printf "%*.3f€ " (5) (price /. discount)
+        else if Float.(<) (price/.discount) 1000.0 then
+          printf "%*.1f€ " (5) (price /. discount)
         else
-          printf "%*.1f€ " (5) (price /. discount);
+          printf "%*.0f€ " (5) (price /. discount);
         if col = 1 then (
           print_endline "|";
           seperate_row max_col;
@@ -126,10 +130,10 @@ let filter_by_status stock_status filter =
           | "none" -> true
           | h -> String.(=) h (String.lowercase stock_status) 
 
-let filter_under price_discount treshold =
+let filter_under price_discount lower_treshold treshold =
           if
-            Float.( < ) price_discount treshold
-            && Float.( > ) price_discount 0.0
+            Float.( <= ) price_discount treshold
+            && Float.( > ) price_discount lower_treshold
           then true
           else false
         
@@ -193,9 +197,11 @@ let rate_stocks ?(filter = "none") stock_data =
         Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =
         match filter with
-          | "under" -> filter_under target_rating 1.0
-          | "fair" -> filter_under target_rating 1.2
-          | hd -> filter_by_status status hd 
+        | "cheap" -> filter_under target_rating 0.0 0.6
+        | "low" -> filter_under target_rating 0.6 0.8
+        | "under" -> filter_under target_rating 0.8 1.0
+        | "fair" -> filter_under target_rating 1.0 1.3
+        | hd -> filter_by_status status hd 
         in
         if is_printable then
           [ (tick_symbol, target_rating, price) ] @ ratings filter tl

@@ -42,8 +42,8 @@ let check_for_arg_dupes available_args args =
 
 let get_available_arguments command =
   match command with
-  | "rate" -> [ [ "fair"; "under"; "owned"; "target"; "saved" ] ]
-  | "update" -> [ [ "price"; "stock"; "forex" ] ]
+  | "rate" -> [ [ "fair"; "under"; "cheap"; "low"; "owned"; "target"; "saved" ] ]
+  | "update" -> [ [ "price"; "stock"; "forex"; "targets" ] ]
   | _ -> []
 
 let check_for_bad_arguments command args =
@@ -89,6 +89,11 @@ let update_data arg =
     printf "Stocks were succesfuly updated\n%!"
   | "forex" -> Stocks_api.update_forex ();
     printf "Forex was succesfuly updated\n%!"
+  | "targets" -> 
+    let updated = Stocks_db.update_targets () in
+    (match updated with
+    | "OK" -> printf "Targets were succesfuly updated\n%!"
+    | code -> printf "DB error updating targets: %s\n" code)
   | _ -> prerr_endline "b"
 
 let delete_parser ticker_symbols =
@@ -111,8 +116,8 @@ let stocks_command_parser args =
   | [] ->
       let stock_commands =
         [
-          ("update", "Args: price, stock, forex");
-          ("rate", "Args: fair, under, owned, target, saved");
+          ("update", "Args: price, stock, forex, targets");
+          ("rate", "Args: fair, under, low, cheap, owned, target, saved");
           ("pull", "");
         ]
       in
