@@ -312,6 +312,7 @@ let select_ratings_data () =
         | tick_symbol :: industry :: sector :: market_cap :: pe :: price
           :: debt :: tax 
           :: bond_rate :: status :: target :: div_yield :: _ ->
+          (try 
             [
               ( Sqlite3.Data.to_string_exn tick_symbol,
                 Sqlite3.Data.to_string_exn industry,
@@ -328,6 +329,10 @@ let select_ratings_data () =
                 );
             ]
             @ results tl
+          with
+          | _ ->
+            printf "%s has bad data\n" (Sqlite3.Data.to_string_exn tick_symbol);
+            [] @ results tl)
         | _ -> [])
     | [] -> []
   in
@@ -741,7 +746,7 @@ let update_targets () =
     	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
     ),
     new_targets AS (
-    	SELECT r.symbol, round(r.base_rating * 0.6 + sm.median * 0.08 + im.median * 0.12 + m.median * 0.05 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
+    	SELECT r.symbol, round(r.base_rating * 0.5 + sm.median * 0.1 + im.median * 0.15 + m.median * 0.1 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
     	FROM Ratings r
     	LEFT JOIN Stocks s
     		ON r.symbol = s.symbol

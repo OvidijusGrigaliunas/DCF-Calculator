@@ -49,7 +49,7 @@ let calc_DFCA cash_flow growth discount =
       let x, y = loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier in
       (cash_flow_growth +. x, cash_flow_discounted +. y)) 
   in
-  let multiplier = 0.95 -. Float.abs(growth) **. 0.9 /. 5.0 in
+  let multiplier = 0.95 -. Float.abs(growth) **. 0.8 /. 8.0 in
   loop cash_flow 0.0 0.8 growth multiplier
 
 let calc_peter_lynch_value eps_growth pe div_yield =
