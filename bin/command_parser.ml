@@ -83,9 +83,12 @@ let rate_command_parser args =
 
 let update_data arg =
   match arg with
-  | "price" -> Stocks_api.update_all_prices ()
-  | "stock" -> Stocks_api.update_data ()
-  | "forex" -> Stocks_api.update_forex ()
+  | "price" -> Stocks_api.update_all_prices ();
+    printf "Prices were succesfuly updated\n%!"
+  | "stock" -> Stocks_api.update_data ();
+    printf "Stocks were succesfuly updated\n%!"
+  | "forex" -> Stocks_api.update_forex ();
+    printf "Forex was succesfuly updated\n%!"
   | _ -> prerr_endline "b"
 
 let delete_parser ticker_symbols =
@@ -128,9 +131,10 @@ let stocks_command_parser args =
           let up_ticker = String.uppercase ticker_symbol in
           Stocks_api.update_stock up_ticker;
           Stocks_api.update_price up_ticker;
-          Stocks_api.update_financials up_ticker
+          Stocks_api.update_financials up_ticker;
+          printf "%s was succesfuly pulled \n%!" (String.uppercase ticker_symbol)
       | _ -> print_endline "Ticker symbol needed")
-  | "remove" :: tl -> delete_parser tl
+  | "remove" :: tl -> delete_parser tl;
   | "rm" :: tl -> delete_parser tl
   | "update" :: tl -> (
       let bad_args_exists = check_for_bad_arguments "update" tl in

@@ -5,7 +5,7 @@ let db = Secrets.current_dir ^ "stocks" |> Sqlite3.db_open
 
 let rec print_results a =
   match a with
-  | [] -> printf ""
+  | [] -> ()
   | hd :: tl -> (
       match hd with
       | Some str ->
@@ -195,7 +195,7 @@ let update_stock ticker
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
-      | "OK" -> printf "%s was succesfuly pulled\n" ticker
+      | "OK" -> ()
       | code -> 
         print_endline code)
   | true -> (
@@ -216,7 +216,7 @@ let update_stock ticker
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
-      | "OK" -> printf "%s was succesfuly updated\n%!" ticker
+      | "OK" -> ()
       | code ->
          print_endline code)
 
@@ -273,7 +273,7 @@ let update_price ticker (price, market_cap, pe) =
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
-      | "OK" -> printf "%s price was succesfuly updated\n%!" ticker
+      | "OK" -> ()
       | code -> print_endline code)
 
 let select_ratings_data () =

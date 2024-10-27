@@ -194,13 +194,20 @@ let update_financials ticker_symbol =
   | true ->
     Stocks_db.update_financials ticker_symbol (List.append financals_data_qrt financals_data_yearly);
     Stocks_db.update_earnings ticker_symbol (List.append eps_data_qrt eps_data_yearly);
-    print_endline "Financials updated";
-  | false -> print_endline "something went wrong"
+  | false -> print_endline "Something went wrong"
   
 
 let update_all_prices () =
   let symbols = Stocks_db.select_stocks_symbols () in
-  List.iter symbols ~f:(fun symbol -> update_price symbol; Thread.delay 0.4)
+  let total = List.length symbols in
+  List.iteri symbols ~f:
+    (fun index symbol ->
+     printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
+     Stdio.Out_channel.flush stdout;
+     update_price symbol;
+     Thread.delay 0.4);
+  printf "\r";
+  Stdio.Out_channel.flush stdout
   
 let update_forex () =
   Stocks_db.clean_up_financials_currency ();
@@ -209,7 +216,6 @@ let update_forex () =
     match currencies with
     | "None" :: tl -> [] @ loop tl
     | hd :: tl ->
-      print_endline hd;
       let end_point = Printf.sprintf "CURRENCY_EXCHANGE_RATE&from_currency=%s&to_currency=EUR" hd in
       let f body = body in
       let data = Lwt_main.run (api_call f end_point "" "") in
@@ -229,8 +235,14 @@ let update_forex () =
 
 let update_data () =
   let symbols = Stocks_db.select_stocks_symbols () in
-  List.iter symbols ~f:(fun symbol ->
+  let total = List.length symbols in
+  List.iteri symbols ~f:(fun index symbol ->
+      printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
+      Stdio.Out_channel.flush stdout;
       update_financials symbol;
       update_price symbol;
+      Thread.delay 0.5
       );
+  printf "\r";
+  Stdio.Out_channel.flush stdout;
   update_forex ()
