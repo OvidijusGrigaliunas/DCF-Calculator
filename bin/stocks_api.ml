@@ -98,11 +98,12 @@ let update_stock ticker_symbol =
       let beta = extract_from_json data "Beta" to_float_exn in
       let market_cap = extract_from_json data "MarketCapitalization" to_int_exn in
       let currency = extract_from_json data "Currency"  to_string in
+      let div_yield = extract_from_json data "DividendYield" to_float_exn in
       let industry = extract_from_json data "Industry" to_string in
       let sector = extract_from_json data "Sector" to_string in
       let country = extract_from_json data "Country" to_string in
       Stocks_db.update_stock ticker_symbol
-        (price, beta, market_cap, currency, industry, sector, country, "TRUE")
+        (price, beta, div_yield, market_cap, currency, industry, sector, country, "TRUE")
   | false -> print_endline "Cant access stock"
 
 let extract_data_fin key (income_json, balance_json, cashflow_json) =
@@ -145,7 +146,35 @@ let extract_data_fin key (income_json, balance_json, cashflow_json) =
         else []
     in
     loop 0 min_arr_length
+
+let extract_data_eps key earnings_json =
+    let time = match key with
+      | "annualEarnings" -> "FY"
+      | _ -> "FQ"
+    in 
+    let eps =
+      extract_from_json_list ~key:key earnings_json "reportedEPS" 0.0 to_float_exn
+    in
+    let year =
+      extract_from_json_list ~key:key earnings_json "fiscalDateEnding" "" to_string
+    in
+    let arr_length = Array.length eps in
+    let rec loop i max_i =
+      if max_i > i then (
+         let financial = (year.(i),
+            time,
+            eps.(i)) in
+          [financial] @ loop (i + 1) max_i
+          )
+        else []
+    in
+    loop 0 arr_length
   
+let get_earnings ticker_symbol =
+  let f body = body in
+  let end_point = "EARNINGS" in
+  Lwt_main.run (api_call f end_point ticker_symbol "") 
+
 let get_financials ticker_symbol =
   let f body = body in
   let income_end_point = "INCOME_STATEMENT" in
@@ -159,9 +188,12 @@ let get_financials ticker_symbol =
 let update_financials ticker_symbol =
   let financals_data_qrt = get_financials ticker_symbol |> extract_data_fin "quarterlyReports" in
   let financals_data_yearly = get_financials ticker_symbol |> extract_data_fin "annualReports" in
+  let eps_data_qrt = get_earnings ticker_symbol |> extract_data_eps "quarterlyEarnings" in
+  let eps_data_yearly = get_earnings ticker_symbol |> extract_data_eps "annualEarnings" in
   match Stocks_db.delete_financials ticker_symbol with
   | true ->
     Stocks_db.update_financials ticker_symbol (List.append financals_data_qrt financals_data_yearly);
+    Stocks_db.update_earnings ticker_symbol (List.append eps_data_qrt eps_data_yearly);
     print_endline "Financials updated";
   | false -> print_endline "something went wrong"
   
@@ -200,5 +232,5 @@ let update_data () =
   List.iter symbols ~f:(fun symbol ->
       update_financials symbol;
       update_price symbol;
-      Thread.delay 0.2);
+      );
   update_forex ()

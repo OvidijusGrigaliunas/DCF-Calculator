@@ -179,7 +179,7 @@ let insert_country country =
       | code -> print_endline code)
 
 let update_stock ticker
-    (price, beta, market_cap, currency, industry, sector, country, pullable) =
+    (price, beta, div_yield, market_cap, currency, industry, sector, country, pullable) =
   let stock_exists = row_exists "Stocks" "symbol" ticker in
   match stock_exists with
   | false -> (
@@ -188,10 +188,10 @@ let update_stock ticker
       insert_industry industry;
       let sql =
         Printf.sprintf
-          "INSERT INTO Stocks (symbol, price, beta, market_cap, currency, \n\
+          "INSERT INTO Stocks (symbol, price, beta, div_yield, market_cap, currency, \n\
           \                          industry, sector, country, pullable)\n\
-          \      VALUES (\"%s\",%f,%f,%i,\"%s\",\"%s\",\"%s\",\"%s\",\"%s\");"
-          ticker price beta market_cap currency industry sector country pullable
+          \      VALUES (\"%s\",%f,%f, %f,%i,\"%s\",\"%s\",\"%s\",\"%s\",\"%s\");"
+          ticker price beta div_yield market_cap currency industry sector country pullable
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
@@ -204,13 +204,14 @@ let update_stock ticker
           "UPDATE Stocks Set\n\
           \        price = %f,\n\
           \        beta = %f,\n\
+          \        div_yield = %f,\n\
           \        market_cap = %i,\n\
           \        currency = \"%s\", \n\
           \        industry = \"%s\",\n\
           \        sector = \"%s\",\n\
           \        country = \"%s\",\n\
           \        pullable = \"%s\"\n\
-          \ Where symbol = \"%s\";" price beta market_cap currency industry
+          \ Where symbol = \"%s\";" price beta div_yield market_cap currency industry
           sector country pullable ticker
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
@@ -281,7 +282,7 @@ let select_ratings_data () =
     SELECT
       s.symbol as ss, s.industry, s.sector, s.market_cap * s.ratio,
       s.pe, s.price * s.ratio, f.total_debt * f.ratio,
-      c.tax, c.bonds_rate, s.status, s.target, MAX(f.year) as ye
+      c.tax, c.bonds_rate, s.status, s.target, s.div_yield, MAX(f.year) as ye
     FROM (
   		SELECT Stocks.*, CASE WHEN Stocks.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
   		FROM Stocks
@@ -310,7 +311,7 @@ let select_ratings_data () =
         match hd with
         | tick_symbol :: industry :: sector :: market_cap :: pe :: price
           :: debt :: tax 
-          :: bond_rate :: status :: target :: _ ->
+          :: bond_rate :: status :: target :: div_yield :: _ ->
             [
               ( Sqlite3.Data.to_string_exn tick_symbol,
                 Sqlite3.Data.to_string_exn industry,
@@ -322,7 +323,8 @@ let select_ratings_data () =
                 Sqlite3.Data.to_float_exn tax,
                 Sqlite3.Data.to_float_exn bond_rate, 
                 Sqlite3.Data.to_string_exn status,
-                Sqlite3.Data.to_int_exn target
+                Sqlite3.Data.to_int_exn target,
+                Sqlite3.Data.to_float_exn div_yield
                 );
             ]
             @ results tl
@@ -330,6 +332,42 @@ let select_ratings_data () =
     | [] -> []
   in
   results sql_data
+
+let delete_earnings ticker =
+  let sql =
+    Printf.sprintf "DELETE FROM Earnings WHERE symbol = \"%s\"" ticker
+  in
+  let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match deleted with "OK" -> () | code -> print_endline code
+
+let update_earnings ticker earnings =
+  delete_earnings ticker;
+  let rec gen_sql earnings =
+    match earnings with
+    | (year, period, eps) :: tl ->
+      let sql_values = Printf.sprintf "
+        (\"%s\",\"%s\", \"%s\",%f)"
+        ticker year period eps
+      in     
+      let line =
+        match tl with
+        | [] -> sql_values
+        | _ -> sql_values ^ ","
+      in 
+      String.append line (gen_sql tl)
+       
+    | [] -> ""
+  in
+  let base_sql = 
+     "INSERT INTO Earnings (symbol, year, period, eps)\n
+       VALUES 
+       "
+  in
+  let sql = base_sql ^ gen_sql earnings in
+  let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match inserted with
+  | "OK" -> ()
+  | code -> print_endline code
 
 let update_speculations symbol growth return moat =
   let sql_delete =
@@ -540,3 +578,120 @@ let delete_stock ticker_symbol =
   match deleted with
   | "OK" -> printf "%s removed\n" ticker_symbol
   | code -> printf "Error: %s\n" code
+
+let select_eps_growth () =
+    let eps_window = "
+      WITH A AS (
+       SELECT Rank, f.year, f.full_date, f.symbol, f.eps, min_year
+        FROM (
+      	SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
+          substr(f.year, 1, 4) as year, 
+      	f.year as full_date,
+      	f.symbol, 
+      	f.eps, 
+      	min(substr(f.year, 1, 4)) over (PARTITION BY f.symbol) as min_year
+      	FROM Earnings f
+      	WHERE period = \"FQ\"
+      	ORDER BY f.year) f
+        WHERE not min_year = year and year > \"2014\"
+      ),
+      count_reports_per_year AS (
+      	SELECT symbol, year, COUNT(Rank) as reports, 
+      	LAG(COUNT(Rank)) OVER (PARTITION BY symbol ORDER BY symbol, year) as prev_year_report_n
+      	FROM A
+      	GROUP BY year, symbol
+      ),
+      T AS (
+        SELECT A.*, c.reports, c.prev_year_report_n
+        FROM A
+        INNER JOIN count_reports_per_year c
+      	on A.year = c.year AND A.symbol = c.symbol
+      ),
+      sum_of_q AS (
+      	SELECT symbol, year, eps
+      	FROM (
+      		SELECT f.symbol, substr(f.year, 1, 4) as year, f.eps 
+      		FROM Earnings f
+      		WHERE period = \"FY\" AND year > \"2014\"
+      		ORDER BY f.symbol, year DESC)
+      	UNION
+      	SELECT symbol, year, sum(eps) as eps
+      	FROM (
+				
+      		SELECT l.year, l.full_date, l.symbol, l.eps, k.prev_year_report_n, ROW_NUMBER() OVER (PARTITION BY l.symbol ORDER BY l.year DESC) AS n
+      			FROM T as l
+      		LEFT JOIN (
+      			SELECT max(year) as year, symbol, prev_year_report_n
+      			FROM T
+      			GROUP BY Symbol) as k
+      		ON k.symbol = l.symbol 
+      		ORDER BY l.symbol, full_date desc
+      	)
+      	WHERE n <= prev_year_report_n
+      	Group by symbol
+      	ORDER BY symbol, year DESC
+	
+      ),  
+      latest_eps_check AS (
+      SELECT symbol, year, eps
+      FROM ( 
+      	SELECT *, MAX(eps) OVER (PARTITION BY symbol, year) AS max_eps, 
+      	lag(eps) OVER (PARTITION BY symbol ORDER BY symbol, year) AS lag_eps,
+      	lag(year) OVER (PARTITION BY symbol ORDER BY symbol, year) AS lag_year
+      	FROM sum_of_q) as f
+      	WHERE eps = max_eps AND NOT (lag_eps = eps AND lag_year = year)
+       ),
+      temp_table AS (
+      SELECT f.symbol, f.year, f.eps, n
+      	FROM (
+      		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
+      		FROM latest_eps_check
+      	) AS f
+      )
+    "
+  in  
+  let n = [2; 3; 4; 5; 6; 7] in
+  let n_year_growth = List.map n ~f:(fun x ->  
+  Printf.sprintf " 
+  SELECT a.symbol, 
+  	CASE 
+  	WHEN NOT (pow((a.eps - b.eps)/abs(B.eps)+1.0, 1.0 / b.n) - 1.0) IS NULL 
+  		THEN pow((a.eps - b.eps)/abs(B.eps)+1.0, 1.0 / b.n) - 1.0
+  	ELSE 0.0
+  	END,
+  	 b.n
+          FROM (
+          	SELECT symbol, eps, n, max(year)
+          	FROM 
+          	temp_table 
+  			WHERE n <= %d
+          	Group by symbol) a
+          LEFT JOIN (
+          	SELECT symbol, eps, n, min(year) 
+          	FROM 
+          	temp_table
+  			WHERE n <= %d
+          	Group by symbol) b 
+        	ON b.symbol = a.symbol
+   	" x x ^ (if not (Int.(=) x 7) then "Union" else ""))
+  in
+  let sql = eps_window ^ String.concat n_year_growth ^ "ORDER BY a.symbol ASC, b.n ASC;" in
+  let stmt = Sqlite3.prepare db sql in
+  let data = fetch_results stmt in
+  let rec results data =
+    match data with
+    | hd :: tl -> (
+        match hd with
+        | tick_symbol :: eps_growth :: duration :: _ ->
+            [
+              ( Sqlite3.Data.to_string_exn tick_symbol,
+                Sqlite3.Data.to_float_exn eps_growth,
+                Sqlite3.Data.to_int_exn duration |> Float.of_int
+                );
+            ]
+            @ results tl
+        | _ -> [])
+    | [] -> []
+  in
+  results data
+

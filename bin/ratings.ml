@@ -2,6 +2,7 @@ open Base
 open Stdio
 
 let first_last_financials = Stocks_db.select_first_and_last_fcf ()
+let eps_growth_list = Stocks_db.select_eps_growth ()
 
 let calc_eq_discount ?(expected_return = 0.10) pe market_cap debt =
   let ep_disc = (408.0 +. pe) /. 420.0 in
@@ -13,7 +14,7 @@ let calc_debt_discount market_cap debt tax bond_rate =
 
 let calc_growth new_fcf old_fcf duration =
   let old_fcf = if Float.(>) old_fcf 0.0 then old_fcf else new_fcf /. 1.5 in 
-  let increase = new_fcf /. old_fcf in
+  let increase = (new_fcf -. old_fcf) /. Float.abs old_fcf +. 1.0 in
   let growth = increase **. (1.0 /. (duration -. 1.0)) -. 1.0 in
   if Float.(<=) growth 0.0 then 0.005 else growth 
   
@@ -51,6 +52,9 @@ let calc_DFCA cash_flow growth discount =
   let multiplier = 0.95 -. Float.abs(growth) **. 0.9 /. 5.0 in
   loop cash_flow 0.0 0.8 growth multiplier
 
+let calc_peter_lynch_value eps_growth pe div_yield =
+  (eps_growth +. div_yield) *. 100.0 /. pe
+
 let calc_terminal_value pe growth_of_10y discount =
   let term_val = pe *. growth_of_10y in
   (term_val, term_val /. ((1.0 +. discount) **. 10.0))
@@ -63,7 +67,12 @@ let calc_intrinsic_value pe cash_flow growth discount =
 let calc_upside market_cap ttm instrinsic_value =
   (instrinsic_value /. (market_cap *. ttm)) -. 1.0
 
-let get_intrinsic_price price upside = price *. (1.0 +. upside)
+let get_intrinsic_price price upside pl_value = 
+  let peter_l_ratio = 0.2 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.8 *. (1.0 +. upside) in
+  let full_ratio = dcf_ratio +. peter_l_ratio in
+  let a = price *. full_ratio in
+  a
 
 let rate_stock_price intrinsic_price current_price target =
   let rating = current_price /. intrinsic_price in
@@ -139,7 +148,8 @@ let rate_stocks ?(filter = "none") stock_data =
               tax,
               bond_rate,
               status,
-              target ) =
+              target,
+              div_yield ) =
           hd
         in
         (* TODO check if desired time gap exists *) 
@@ -151,9 +161,10 @@ let rate_stocks ?(filter = "none") stock_data =
           List.map filtered_fl_financials ~f:(fun (_, _, _, d) -> d) 
           |> List.fold ~init:Float.min_value ~f:Float.max
         in
-        let _, new_fcf, old_fcf, duration = List.find_exn first_last_financials ~f:(
-          fun (a, _, _, n) -> String.(=) a tick_symbol && Float.(=) n max_period)
+        let _, new_fcf, old_fcf, duration = List.find_exn filtered_fl_financials~f:(
+          fun (_, _, _, n) -> Float.(=) n max_period)
         in
+          
         let industry_rating = get_industry_rating industry sector in
         let discount =
           calc_discount market_cap pe debt tax bond_rate industry_rating 
@@ -163,8 +174,22 @@ let rate_stocks ?(filter = "none") stock_data =
           calc_intrinsic_value pe new_fcf growth discount
         in
         let upside = calc_upside market_cap pe intrinsic_value in
-        let intrinsic_price = get_intrinsic_price price upside in
+        
+        let filtered_eps = 
+          List.filter eps_growth_list ~f:(
+          fun (a, _, _) -> String.(=) a tick_symbol) 
+        in
+        let max_period_eps =  
+          List.map filtered_eps ~f:(fun (_, _, d) -> d) 
+          |> List.fold ~init:Float.min_value ~f:Float.max
+        in
+        let _, eps_growth, _ = List.find_exn filtered_eps ~f:(
+          fun (_, _, n) ->  Float.(=) n max_period_eps)
+        in
+        let pl_value = calc_peter_lynch_value eps_growth pe div_yield in
+        let intrinsic_price = get_intrinsic_price price upside pl_value in
         let rating, target_rating = rate_stock_price intrinsic_price price target in
+       
         Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =
         match filter with
