@@ -4,8 +4,8 @@ open Stdio
 let first_last_financials = Stocks_db.select_first_and_last_fcf ()
 let eps_growth_list = Stocks_db.select_eps_growth ()
 
-let calc_eq_discount ?(expected_return = 0.10) pe market_cap debt =
-  let ep_disc = (408.0 +. pe) /. 420.0 in
+let calc_eq_discount ?(expected_return = 0.15) pe market_cap debt =
+  let ep_disc = (308.0 +. pe) /. 320.0 in
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   ep_disc *. eq_disc
 
@@ -36,7 +36,7 @@ let calc_discount market_cap pe debt tax bond_rate
 let calc_DFCA cash_flow growth discount =
   let rec loop cash_flow year limiter growth growth_multiplier = 
     (match year with
-    | 10.0 -> (0.0, 0.0)
+    | 10.0 -> []
     | year ->
       let current_year_growth = growth *. (if Float.(<) limiter 0.0 then growth_multiplier else 1.0) in
       let cash_flow_growth =
@@ -46,30 +46,38 @@ let calc_DFCA cash_flow growth discount =
         cash_flow_growth /. ((1.0 +. discount) **. year)
       in
       let new_limiter = limiter -. Float.abs growth in
-      let x, y = loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier in
-      (cash_flow_growth +. x, cash_flow_discounted +. y)) 
+      [(cash_flow_growth, cash_flow_discounted)]
+       @ loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier 
+    ) 
   in
-  let multiplier = 0.95 -. Float.abs(growth) **. 0.8 /. 8.0 in
-  loop cash_flow 0.0 0.8 growth multiplier
+  let multiplier = 0.90 -. Float.abs(growth) **. 0.1 /. 4.0 in
+  let dcf_list = loop cash_flow 0.0 0.6 growth multiplier |> List.rev in
+  let growth_10y = 
+    match dcf_list with
+    | (hd, _) :: _ -> hd
+    | _ -> 0.0
+  in
+  let discount_sum = List.fold ~init:0.0 dcf_list ~f:(fun acc (_, a) -> acc +. a) in
+  (growth_10y, discount_sum)  
 
 let calc_peter_lynch_value eps_growth pe div_yield =
   (eps_growth +. div_yield) *. 100.0 /. pe
 
 let calc_terminal_value pe growth_of_10y discount =
-  let term_val = pe *. growth_of_10y in
-  (term_val, term_val /. ((1.0 +. discount) **. 10.0))
+  let term_val = (pe *. growth_of_10y) /. ((1.0 +. discount) **. 10.0) in
+  term_val
 
 let calc_intrinsic_value pe cash_flow growth discount =
   let growth_10y, disc_10y = calc_DFCA cash_flow growth discount in
-  let _, disc_term_val = calc_terminal_value pe growth_10y discount in
+  let disc_term_val = calc_terminal_value pe growth_10y discount in
   disc_term_val +. disc_10y
 
-let calc_upside market_cap ttm instrinsic_value =
-  (instrinsic_value /. (market_cap *. ttm)) -. 1.0
+let calc_upside cash_flow ttm instrinsic_value =
+  (instrinsic_value /. (cash_flow *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
-  let peter_l_ratio = 0.4 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.6 *. (1.0 +. upside) in
+  let peter_l_ratio = 0.2 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.8 *. (1.0 +. upside) in
   let full_ratio = dcf_ratio +. peter_l_ratio in
   let a = price *. full_ratio in
   a
@@ -177,7 +185,7 @@ let rate_stocks ?(filter = "none") stock_data =
         let intrinsic_value =
           calc_intrinsic_value pe new_fcf growth discount
         in
-        let upside = calc_upside market_cap pe intrinsic_value in
+        let upside = calc_upside new_fcf pe intrinsic_value in
         
         let filtered_eps = 
           List.filter eps_growth_list ~f:(

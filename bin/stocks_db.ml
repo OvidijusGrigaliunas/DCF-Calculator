@@ -415,6 +415,10 @@ let delete_splits ticker =
   in
   let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
   match deleted with "OK" -> () | code -> print_endline code
+let clean_splits () =
+  let sql = "DELETE FROM Splits WHERE \"date\" = \"\" OR amount = 0.0" in
+  let clean= Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match clean with "OK" -> () | code -> print_endline code
 
 let update_splits ticker splits =
   delete_splits ticker;
@@ -851,7 +855,7 @@ let update_targets () =
     	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
     ),
     new_targets AS (
-    	SELECT r.symbol, round(r.base_rating * 0.5 + sm.median * 0.05 + im.median * 0.12 + m.median * 0.08 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
+    	SELECT r.symbol, round(1.0 + sm.median * 0.1 + im.median * 0.2 - m.median * 0.2 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
     	FROM Ratings r
     	LEFT JOIN Stocks s
     		ON r.symbol = s.symbol
