@@ -43,7 +43,7 @@ let check_for_arg_dupes available_args args =
 let get_available_arguments command =
   match command with
   | "rate" -> [ [ "fair"; "under"; "cheap"; "low"; "owned"; "target"; "saved" ] ]
-  | "update" -> [ [ "price"; "stock"; "forex"; "targets" ] ]
+  | "update" -> [ [ "splits"; "price"; "stock"; "forex"; "targets"; "history"] ]
   | _ -> []
 
 let check_for_bad_arguments command args =
@@ -89,6 +89,10 @@ let update_data arg =
     printf "Stocks were succesfuly updated\n%!"
   | "forex" -> Stocks_api.update_forex ();
     printf "Forex was succesfuly updated\n%!"
+  | "splits" -> Stocks_api.update_splits ();
+    printf "Splits were succesfuly updated\n%!"
+  | "history" -> Stocks_api.update_history_prices ();
+    printf "Historical data was succesfuly updated\n%!"
   | "targets" -> 
     let updated = Stocks_db.update_targets () in
     (match updated with
@@ -136,7 +140,7 @@ let stocks_command_parser args =
           let up_ticker = String.uppercase ticker_symbol in
           Stocks_api.update_stock up_ticker;
           Stocks_api.update_price up_ticker;
-          Stocks_api.update_financials up_ticker;
+          Stocks_api.update_fundamentals up_ticker;
           printf "%s was succesfuly pulled \n%!" (String.uppercase ticker_symbol)
       | _ -> print_endline "Ticker symbol needed")
   | "remove" :: tl -> delete_parser tl;

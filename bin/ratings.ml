@@ -68,8 +68,8 @@ let calc_upside market_cap ttm instrinsic_value =
   (instrinsic_value /. (market_cap *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
-  let peter_l_ratio = 0.2 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.8 *. (1.0 +. upside) in
+  let peter_l_ratio = 0.4 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.6 *. (1.0 +. upside) in
   let full_ratio = dcf_ratio +. peter_l_ratio in
   let a = price *. full_ratio in
   a

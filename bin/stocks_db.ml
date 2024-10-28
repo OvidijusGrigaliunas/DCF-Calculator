@@ -374,6 +374,111 @@ let update_earnings ticker earnings =
   | "OK" -> ()
   | code -> print_endline code
 
+let delete_dividends ticker =
+  let sql =
+    Printf.sprintf "DELETE FROM Dividends WHERE symbol = \"%s\"" ticker
+  in
+  let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match deleted with "OK" -> () | code -> print_endline code
+
+let update_dividends ticker dividends =
+  delete_dividends ticker;
+  let rec gen_sql dividends =
+    match dividends with
+    | (year, amount) :: tl ->
+      let sql_values = Printf.sprintf "
+        (\"%s\",\"%s\", %f)"
+        ticker year amount
+      in     
+      let line =
+        match tl with
+        | [] -> sql_values
+        | _ -> sql_values ^ ","
+      in 
+      String.append line (gen_sql tl)
+    | [] -> ""
+  in
+  let base_sql = 
+     "INSERT INTO Dividends (symbol, ex_date, amount)\n
+       VALUES 
+       "
+  in
+  let sql = base_sql ^ gen_sql dividends in
+  let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match inserted with
+  | "OK" -> ()
+  | code -> print_endline code
+
+let delete_splits ticker =
+  let sql =
+    Printf.sprintf "DELETE FROM Splits WHERE symbol = \"%s\"" ticker
+  in
+  let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match deleted with "OK" -> () | code -> print_endline code
+
+let update_splits ticker splits =
+  delete_splits ticker;
+  let rec gen_sql splits =
+    match splits with
+    | (year, amount) :: tl ->
+      let sql_values = Printf.sprintf "
+        (\"%s\",\"%s\", %f)"
+        ticker year amount
+      in     
+      let line =
+        match tl with
+        | [] -> sql_values
+        | _ -> sql_values ^ ","
+      in 
+      String.append line (gen_sql tl)
+    | [] -> ""
+  in
+  let base_sql = 
+     "INSERT INTO splits (symbol, date, amount)\n
+       VALUES 
+       "
+  in
+  let sql = base_sql ^ gen_sql splits in
+  let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match inserted with
+  | "OK" -> ()
+  | code -> print_endline code
+
+let delete_history_prices ticker =
+  let sql =
+    Printf.sprintf "DELETE FROM Historical_prices WHERE symbol = \"%s\"" ticker
+  in
+  let deleted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match deleted with "OK" -> () | code -> print_endline code
+
+let update_history_prices ticker prices =
+  delete_history_prices ticker;
+  let rec gen_sql prices =
+    match prices with
+    | (year, price) :: tl ->
+      let sql_values = Printf.sprintf "
+        (\"%s\",\"%s\", %f)"
+        ticker year price
+      in     
+      let line =
+        match tl with
+        | [] -> sql_values
+        | _ -> sql_values ^ ","
+      in 
+      String.append line (gen_sql tl)
+    | [] -> ""
+  in
+  let base_sql = 
+     "INSERT INTO Historical_prices (symbol, date, price)\n
+       VALUES 
+       "
+  in
+  let sql = base_sql ^ gen_sql prices in
+  let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match inserted with
+  | "OK" -> ()
+  | code -> print_endline ("History data update error:" ^ code)
+
 let update_speculations symbol growth return moat =
   let sql_delete =
     Printf.sprintf
@@ -746,7 +851,7 @@ let update_targets () =
     	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
     ),
     new_targets AS (
-    	SELECT r.symbol, round(r.base_rating * 0.5 + sm.median * 0.1 + im.median * 0.15 + m.median * 0.1 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
+    	SELECT r.symbol, round(r.base_rating * 0.5 + sm.median * 0.05 + im.median * 0.12 + m.median * 0.08 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
     	FROM Ratings r
     	LEFT JOIN Stocks s
     		ON r.symbol = s.symbol

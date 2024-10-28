@@ -170,10 +170,98 @@ let extract_data_eps key earnings_json =
     in
     loop 0 arr_length
   
+let extract_data_div dividends_json =
+    let amount =
+      extract_from_json_list ~key:"data" dividends_json "amount" 0.0 to_float_exn
+    in
+    let year =
+      extract_from_json_list ~key:"data" dividends_json "ex_dividend_date" "" to_string
+    in
+    let arr_length = Array.length amount in
+    let rec loop i max_i =
+      if max_i > i then (
+         let dividends =
+           (year.(i),
+            amount.(i)) in
+          [dividends] @ loop (i + 1) max_i
+          )
+        else []
+    in
+    loop 0 arr_length
+
 let get_earnings ticker_symbol =
   let f body = body in
   let end_point = "EARNINGS" in
   Lwt_main.run (api_call f end_point ticker_symbol "") 
+
+let get_dividends ticker_symbol =
+  let f body = body in
+  let end_point = "DIVIDENDS" in
+  Lwt_main.run (api_call f end_point ticker_symbol "") 
+
+let get_splits ticker_symbol = 
+  let f body = body in
+  let end_point = "SPLITS" in
+  Lwt_main.run (api_call f end_point ticker_symbol "") 
+
+let extract_data_splits splits_json =
+  
+    let amount =
+      extract_from_json_list ~key:"data" splits_json "split_factor" 0.0 to_float_exn
+    in
+    let year =
+      extract_from_json_list ~key:"data" splits_json "effective_date" "" to_string
+    in
+    let arr_length = Array.length amount in
+    let rec loop i max_i =
+      if max_i > i then (
+         [(year.(i), amount.(i))] @ loop (i + 1) max_i
+        )
+      else []
+    in
+    loop 0 arr_length
+  
+let update_splits () =
+  let symbols = Stocks_db.select_stocks_symbols () in
+  let total = List.length symbols in
+  List.iteri symbols ~f:
+    (fun index symbol ->
+     printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
+     Stdio.Out_channel.flush stdout;
+     get_splits symbol
+     |> extract_data_splits
+     |> Stocks_db.update_splits symbol; 
+     Thread.delay 0.6);
+  printf "\r\n";
+  Stdio.Out_channel.flush stdout
+
+let extract_json_his_price price_json  =
+  let json = Yojson.Basic.from_string price_json in
+  let data_list = Yojson.Basic.Util.(member "Time Series (Daily)" json) |> to_assoc in
+  List.map data_list ~f:(
+    fun (date, data) ->
+      let close = member "4. close" data |> to_float_exn in
+      (date, close)
+    )
+
+let get_historical_prices ticker_symbol =
+  let f body = body in
+  let end_point = "TIME_SERIES_DAILY&outputsize=full" in
+  Lwt_main.run (api_call f end_point ticker_symbol "") 
+
+let update_history_prices () =
+  let symbols = Stocks_db.select_stocks_symbols () in
+  let total = List.length symbols in
+  List.iteri symbols ~f:
+    (fun index symbol ->
+     printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
+     Stdio.Out_channel.flush stdout;
+     get_historical_prices symbol
+     |> extract_json_his_price
+     |> Stocks_db.update_history_prices symbol; 
+     Thread.delay 0.4);
+  printf "\r\n";
+  Stdio.Out_channel.flush stdout
 
 let get_financials ticker_symbol =
   let f body = body in
@@ -185,18 +273,19 @@ let get_financials ticker_symbol =
   let cashflow_json = Lwt_main.run (api_call f cashflow_end_point ticker_symbol "") in
   (income_json, balance_json, cashflow_json)
 
-let update_financials ticker_symbol =
+let update_fundamentals ticker_symbol =
   let financals_data_qrt = get_financials ticker_symbol |> extract_data_fin "quarterlyReports" in
   let financals_data_yearly = get_financials ticker_symbol |> extract_data_fin "annualReports" in
   let eps_data_qrt = get_earnings ticker_symbol |> extract_data_eps "quarterlyEarnings" in
   let eps_data_yearly = get_earnings ticker_symbol |> extract_data_eps "annualEarnings" in
+  let dividends = get_dividends ticker_symbol |> extract_data_div in
   match Stocks_db.delete_financials ticker_symbol with
   | true ->
     Stocks_db.update_financials ticker_symbol (List.append financals_data_qrt financals_data_yearly);
     Stocks_db.update_earnings ticker_symbol (List.append eps_data_qrt eps_data_yearly);
+    Stocks_db.update_dividends ticker_symbol dividends
   | false -> print_endline "Something went wrong"
   
-
 let update_all_prices () =
   let symbols = Stocks_db.select_stocks_symbols () in
   let total = List.length symbols in
@@ -239,9 +328,9 @@ let update_data () =
   List.iteri symbols ~f:(fun index symbol ->
       printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
       Stdio.Out_channel.flush stdout;
-      update_financials symbol;
+      update_fundamentals symbol;
       update_price symbol;
-      Thread.delay 0.5
+      Thread.delay 0.3
       );
   printf "\r\n";
   Stdio.Out_channel.flush stdout;
