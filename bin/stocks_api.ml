@@ -57,7 +57,7 @@ let api_call f endpoint symbol default =
     | _ -> Printf.sprintf "%s&symbol=%s&apikey=%s" api_function symbol Secrets.api_key
   in
   let get () = Client.get (Uri.of_string url) in
-  compute ~time:8.0 ~f:get >>= function
+  compute ~time:60.0 ~f:get >>= function
   | `Timeout ->
       print_endline "Timeout";
       return default
@@ -67,24 +67,14 @@ let api_call f endpoint symbol default =
       | 200 -> body |> Cohttp_lwt.Body.to_string >|= fun body -> f body
       | _ -> body |> Cohttp_lwt.Body.to_string >|= fun _ -> default)
 
-let get_market_cap_and_ep ticker_symbol =
-  let end_point = "OVERVIEW" in
-  let f body =
-    let market_cap = extract_from_json body  "MarketCapitalization" to_int_exn in
-    let pe = extract_from_json body "TrailingPE"  to_float_exn in
-    (market_cap, pe)
-  in
-  Lwt_main.run (api_call f end_point ticker_symbol (0, 0.0))
-
 let get_price ticker_symbol =
   let end_point = "GLOBAL_QUOTE" in
   let f body = extract_from_json ~key:"Global Quote" body "05. price" to_float_exn in
-    Lwt_main.run (api_call f end_point ticker_symbol (0.0)) 
+  Lwt_main.run (api_call f end_point ticker_symbol (0.0)) 
 
 let update_price ticker_symbol =
   let price = get_price ticker_symbol in
-  let cap, ep = get_market_cap_and_ep ticker_symbol in
-  Stocks_db.update_price ticker_symbol (price, cap, ep)
+  Stocks_db.update_price ticker_symbol price
 
 let update_stock ticker_symbol =
   let end_point = "OVERVIEW"  in
@@ -94,58 +84,57 @@ let update_stock ticker_symbol =
   let stock_exits = String.( = ) ticker_symbol ticker_symbol_2 in
   match stock_exits with
   | true ->
-      let price = get_price ticker_symbol in
       let beta = extract_from_json data "Beta" to_float_exn in
-      let market_cap = extract_from_json data "MarketCapitalization" to_int_exn in
+      let shares = extract_from_json data "SharesOutstanding" to_int_exn in
       let currency = extract_from_json data "Currency"  to_string in
       let div_yield = extract_from_json data "DividendYield" to_float_exn in
       let industry = extract_from_json data "Industry" to_string in
       let sector = extract_from_json data "Sector" to_string in
       let country = extract_from_json data "Country" to_string in
       Stocks_db.update_stock ticker_symbol
-        (price, beta, div_yield, market_cap, currency, industry, sector, country, "TRUE")
+         (beta, div_yield, shares, currency, industry, sector, country, "TRUE")
   | false -> print_endline "Cant access stock"
 
 let extract_data_fin key (income_json, balance_json, cashflow_json) =
-    let cash =
-      extract_from_json_list ~key:key balance_json "cashAndCashEquivalentsAtCarryingValue" 0 to_int_exn
-    in
-    let currency =
-      extract_from_json_list ~key:key balance_json "reportedCurrency" "USD" to_string
-    in
-    let assests =
-      extract_from_json_list ~key:key balance_json "totalAssets" 0 to_int_exn
-    in
-    let debt = extract_from_json_list ~key:key balance_json "currentDebt" 0 to_int_exn in
-    let year = extract_from_json_list ~key:key income_json "fiscalDateEnding" "" to_string in
-    let revenue = extract_from_json_list ~key:key income_json "totalRevenue" 0 to_int_exn in
-    let net_income =
-      extract_from_json_list ~key:key income_json "netIncome" 0 to_int_exn
-    in
-    let cash_flow =
-      extract_from_json_list ~key:key cashflow_json "operatingCashflow" 0 to_int_exn
-    in
-    let time = match key with
-      | "annualReports" -> "FY"
-      | _ -> "FQ"
-    in 
-    let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income) in
-    let rec loop i max_i =
-      if max_i > i then (
-         let financial = (year.(i),
-            time,
-            net_income.(i),
-            cash_flow.(i),
-            revenue.(i),
-            cash.(i),
-            assests.(i), 
-            debt.(i),
-            currency.(i)) in
-          [financial] @ loop (i + 1) max_i
-          )
-        else []
-    in
-    loop 0 min_arr_length
+  let cash =
+    extract_from_json_list ~key:key balance_json "cashAndCashEquivalentsAtCarryingValue" 0 to_int_exn
+  in
+  let currency =
+    extract_from_json_list ~key:key balance_json "reportedCurrency" "USD" to_string
+  in
+  let assests =
+    extract_from_json_list ~key:key balance_json "totalAssets" 0 to_int_exn
+  in
+  let debt = extract_from_json_list ~key:key balance_json "currentDebt" 0 to_int_exn in
+  let year = extract_from_json_list ~key:key income_json "fiscalDateEnding" "" to_string in
+  let revenue = extract_from_json_list ~key:key income_json "totalRevenue" 0 to_int_exn in
+  let net_income =
+    extract_from_json_list ~key:key income_json "netIncome" 0 to_int_exn
+  in
+  let cash_flow =
+    extract_from_json_list ~key:key cashflow_json "operatingCashflow" 0 to_int_exn
+  in
+  let time = match key with
+    | "annualReports" -> "FY"
+    | _ -> "FQ"
+  in 
+  let min_arr_length = min (Array.length cash) (Array.length cash_flow) |> min (Array.length net_income) in
+  let rec loop i max_i =
+    if max_i > i then (
+       let financial = (year.(i),
+          time,
+          net_income.(i),
+          cash_flow.(i),
+          revenue.(i),
+          cash.(i),
+          assests.(i), 
+          debt.(i),
+          currency.(i)) in
+        [financial] @ loop (i + 1) max_i
+        )
+      else []
+  in
+  loop 0 min_arr_length 
 
 let extract_data_eps key earnings_json =
     let time = match key with
@@ -205,7 +194,6 @@ let get_splits ticker_symbol =
   Lwt_main.run (api_call f end_point ticker_symbol "") 
 
 let extract_data_splits splits_json =
-  
     let amount =
       extract_from_json_list ~key:"data" splits_json "split_factor" 0.0 to_float_exn
     in
@@ -230,8 +218,8 @@ let update_splits () =
      Stdio.Out_channel.flush stdout;
      get_splits symbol
      |> extract_data_splits
-     |> Stocks_db.update_splits symbol; 
-     Thread.delay 0.6);
+     |> Stocks_db.update_splits symbol 
+     );
   printf "\r\n";
   Stdio.Out_channel.flush stdout
 
@@ -258,8 +246,7 @@ let update_history_prices () =
      Stdio.Out_channel.flush stdout;
      get_historical_prices symbol
      |> extract_json_his_price
-     |> Stocks_db.update_history_prices symbol; 
-     Thread.delay 0.4);
+     |> Stocks_db.update_history_prices symbol);
   printf "\r\n";
   Stdio.Out_channel.flush stdout
 
@@ -274,10 +261,12 @@ let get_financials ticker_symbol =
   (income_json, balance_json, cashflow_json)
 
 let update_fundamentals ticker_symbol =
-  let financals_data_qrt = get_financials ticker_symbol |> extract_data_fin "quarterlyReports" in
-  let financals_data_yearly = get_financials ticker_symbol |> extract_data_fin "annualReports" in
-  let eps_data_qrt = get_earnings ticker_symbol |> extract_data_eps "quarterlyEarnings" in
-  let eps_data_yearly = get_earnings ticker_symbol |> extract_data_eps "annualEarnings" in
+  let financials = get_financials ticker_symbol in
+  let earnings = get_earnings ticker_symbol in
+  let financals_data_qrt = extract_data_fin "quarterlyReports" financials in
+  let financals_data_yearly = extract_data_fin "annualReports" financials in
+  let eps_data_qrt = extract_data_eps "quarterlyEarnings" earnings in
+  let eps_data_yearly = extract_data_eps "annualEarnings" earnings in
   let dividends = get_dividends ticker_symbol |> extract_data_div in
   match Stocks_db.delete_financials ticker_symbol with
   | true ->
@@ -289,13 +278,14 @@ let update_fundamentals ticker_symbol =
 let update_all_prices () =
   let symbols = Stocks_db.select_stocks_symbols () in
   let total = List.length symbols in
+  let start = Unix.gettimeofday () in
   List.iteri symbols ~f:
     (fun index symbol ->
      printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
      Stdio.Out_channel.flush stdout;
-     update_price symbol;
-     Thread.delay 0.4);
-  printf "\r\n";
+     update_price symbol);
+  let end_time = Unix.gettimeofday () in
+  printf "\rTotal time: %.2f\n" (end_time -. start);
   Stdio.Out_channel.flush stdout
   
 let update_forex () =
@@ -325,13 +315,18 @@ let update_forex () =
 let update_data () =
   let symbols = Stocks_db.select_stocks_symbols () in
   let total = List.length symbols in
+  let start = Unix.gettimeofday () in
+  printf "%*s (%d/%d)" (-7) "" (0) total;
   List.iteri symbols ~f:(fun index symbol ->
-      printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
-      Stdio.Out_channel.flush stdout;
-      update_fundamentals symbol;
-      update_price symbol;
-      Thread.delay 0.3
-      );
-  printf "\r\n";
+    let time = Unix.gettimeofday () in
+    Stdio.Out_channel.flush stdout;
+    update_stock symbol;
+    update_fundamentals symbol;
+    update_price symbol;
+    let dur = Unix.gettimeofday () -. time in
+    printf "\r%*s (%d/%d) %*.2f s" (-7) symbol (index + 1) total (7) dur
+  );
+  let end_time = Unix.gettimeofday () in
+  printf "\rTotal time: %.2f\n" (end_time -. start);
   Stdio.Out_channel.flush stdout;
   update_forex ()

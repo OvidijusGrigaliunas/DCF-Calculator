@@ -5,7 +5,7 @@ let first_last_financials = Stocks_db.select_first_and_last_fcf ()
 let eps_growth_list = Stocks_db.select_eps_growth ()
 
 let calc_eq_discount ?(expected_return = 0.15) pe market_cap debt =
-  let ep_disc = (308.0 +. pe) /. 320.0 in
+  let ep_disc = (338.0 +. pe) /. 350.0 in
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   ep_disc *. eq_disc
 
@@ -50,7 +50,7 @@ let calc_DFCA cash_flow growth discount =
        @ loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier 
     ) 
   in
-  let multiplier = 0.90 -. Float.abs(growth) **. 0.1 /. 4.0 in
+  let multiplier = 0.88 -. Float.abs(growth) **. 0.1 /. 4.0 in
   let dcf_list = loop cash_flow 0.0 0.6 growth multiplier |> List.rev in
   let growth_10y = 
     match dcf_list with
@@ -76,8 +76,8 @@ let calc_upside cash_flow ttm instrinsic_value =
   (instrinsic_value /. (cash_flow *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
-  let peter_l_ratio = 0.2 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.8 *. (1.0 +. upside) in
+  let peter_l_ratio = 0.3 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.7 *. (1.0 +. upside) in
   let full_ratio = dcf_ratio +. peter_l_ratio in
   let a = price *. full_ratio in
   a
@@ -144,76 +144,94 @@ let filter_under price_discount lower_treshold treshold =
             && Float.( > ) price_discount lower_treshold
           then true
           else false
-        
+let calc_market_cap price shares_outstanding =
+  price *. shares_outstanding 
+
+let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
+  let ( _,
+        industry,
+        sector,
+        shares,
+        pe,
+        price,
+        debt,
+        tax,
+        bond_rate,
+        _, _, _) = stock_data in
+  let market_cap = calc_market_cap price shares in
+  let industry_rating = get_industry_rating industry sector in
+  let discount =
+    calc_discount market_cap pe debt tax bond_rate industry_rating 
+  in
+  let growth = calc_growth new_fcf old_fcf years in
+  let intrinsic_value =
+    calc_intrinsic_value pe new_fcf growth discount
+  in
+  calc_upside new_fcf pe intrinsic_value
+
 let rate_stocks ?(filter = "none") stock_data =
   let rec ratings filter stock_data =
     match stock_data with
     | [] -> []
     | hd :: tl ->
         let ( tick_symbol,
-              industry,
-              sector,
-              market_cap,
+              _,
+              _,
+              _,
               pe,
               price,
-              debt,
-              tax,
-              bond_rate,
+              _,
+              _,
+              _,
               status,
               target,
               div_yield ) =
           hd
         in
-        (* TODO check if desired time gap exists *) 
-        let filtered_fl_financials =
-          List.filter first_last_financials ~f:(
-          fun (a, _, _, _) -> String.(=) a tick_symbol) 
-        in
-        let max_period = 
-          List.map filtered_fl_financials ~f:(fun (_, _, _, d) -> d) 
-          |> List.fold ~init:Float.min_value ~f:Float.max
-        in
-        let _, new_fcf, old_fcf, duration = List.find_exn filtered_fl_financials~f:(
-          fun (_, _, _, n) -> Float.(=) n max_period)
-        in
-          
-        let industry_rating = get_industry_rating industry sector in
-        let discount =
-          calc_discount market_cap pe debt tax bond_rate industry_rating 
-        in
-        let growth = calc_growth new_fcf old_fcf duration in
-        let intrinsic_value =
-          calc_intrinsic_value pe new_fcf growth discount
-        in
-        let upside = calc_upside new_fcf pe intrinsic_value in
-        
-        let filtered_eps = 
-          List.filter eps_growth_list ~f:(
-          fun (a, _, _) -> String.(=) a tick_symbol) 
-        in
-        let max_period_eps =  
-          List.map filtered_eps ~f:(fun (_, _, d) -> d) 
-          |> List.fold ~init:Float.min_value ~f:Float.max
-        in
-        let _, eps_growth, _ = List.find_exn filtered_eps ~f:(
-          fun (_, _, n) ->  Float.(=) n max_period_eps)
-        in
-        let pl_value = calc_peter_lynch_value eps_growth pe div_yield in
-        let intrinsic_price = get_intrinsic_price price upside pl_value in
-        let rating, target_rating = rate_stock_price intrinsic_price price target in
+        try(
+          let filtered_fl_financials =
+            List.filter first_last_financials ~f:(
+            fun (a, _, _, _) -> String.(=) a tick_symbol) 
+          in
+          let dcf_upsides = List.map filtered_fl_financials ~f:(
+            fun (_, b, c, d) -> get_dcf_upside hd (b, c, d))          
+          in
+          let dcf_upside_avg =
+            let sum = List.fold dcf_upsides ~init:0.0 ~f:(+.) in
+            sum /. (Float.of_int (List.length dcf_upsides))
+          in
+          let filtered_eps = 
+            List.filter eps_growth_list ~f:(
+            fun (a, _, _) -> String.(=) a tick_symbol) 
+          in
+          let pl_values = List.map filtered_eps ~f:(
+            fun (_, b, _) -> calc_peter_lynch_value b pe div_yield )          
+          in
+          let pl_value_avg=
+            let sum = List.fold pl_values ~init:0.0 ~f:(+.) in
+            sum /. (Float.of_int (List.length dcf_upsides))
+          in
+          let intrinsic_price = get_intrinsic_price price dcf_upside_avg pl_value_avg in
+          let rating, target_rating = rate_stock_price intrinsic_price price target in
        
-        Stocks_db.insert_ratings tick_symbol rating target_rating;
-        let is_printable =
-        match filter with
-        | "cheap" -> filter_under target_rating 0.0 0.6
-        | "low" -> filter_under target_rating 0.6 0.8
-        | "under" -> filter_under target_rating 0.8 1.0
-        | "fair" -> filter_under target_rating 1.0 1.3
-        | hd -> filter_by_status status hd 
-        in
-        if is_printable then
-          [ (tick_symbol, target_rating, price) ] @ ratings filter tl
-        else ratings filter tl
+          Stocks_db.insert_ratings tick_symbol rating target_rating;
+          let is_printable =
+          match filter with
+          | "cheap" -> filter_under target_rating 0.0 0.6
+          | "low" -> filter_under target_rating 0.6 0.8
+          | "under" -> filter_under target_rating 0.8 1.0
+          | "fair" -> filter_under target_rating 1.0 1.3
+          | hd -> filter_by_status status hd 
+          in
+          if is_printable then
+            [ (tick_symbol, target_rating, price) ] @ ratings filter tl
+          else ratings filter tl
+        )
+        with 
+        | a -> 
+          let b = Exn.to_string a in
+          printf "Error: %s\n" b;
+          ratings filter tl
   in
   ratings filter stock_data |> print_price_rating
 

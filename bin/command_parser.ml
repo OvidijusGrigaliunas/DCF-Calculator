@@ -139,8 +139,8 @@ let stocks_command_parser args =
       | ticker_symbol :: _ ->
           let up_ticker = String.uppercase ticker_symbol in
           Stocks_api.update_stock up_ticker;
-          Stocks_api.update_price up_ticker;
           Stocks_api.update_fundamentals up_ticker;
+          Stocks_api.update_price up_ticker;
           printf "%s was succesfuly pulled \n%!" (String.uppercase ticker_symbol)
       | _ -> print_endline "Ticker symbol needed")
   | "remove" :: tl -> delete_parser tl;

@@ -179,7 +179,7 @@ let insert_country country =
       | code -> print_endline code)
 
 let update_stock ticker
-    (price, beta, div_yield, market_cap, currency, industry, sector, country, pullable) =
+    (beta, div_yield, shares, currency, industry, sector, country, pullable) =
   let stock_exists = row_exists "Stocks" "symbol" ticker in
   match stock_exists with
   | false -> (
@@ -188,10 +188,10 @@ let update_stock ticker
       insert_industry industry;
       let sql =
         Printf.sprintf
-          "INSERT INTO Stocks (symbol, price, beta, div_yield, market_cap, currency, \n\
+          "INSERT INTO Stocks (symbol, beta, div_yield, shares, currency, \n\
           \                          industry, sector, country, pullable)\n\
-          \      VALUES (\"%s\",%f,%f, %f,%i,\"%s\",\"%s\",\"%s\",\"%s\",\"%s\");"
-          ticker price beta div_yield market_cap currency industry sector country pullable
+          \      VALUES (\"%s\",%f, %f,%i,\"%s\",\"%s\",\"%s\",\"%s\",\"%s\");"
+          ticker beta div_yield shares currency industry sector country pullable
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
@@ -202,16 +202,15 @@ let update_stock ticker
       let sql =
         Printf.sprintf
           "UPDATE Stocks Set\n\
-          \        price = %f,\n\
           \        beta = %f,\n\
           \        div_yield = %f,\n\
-          \        market_cap = %i,\n\
+          \        shares = %i,\n\
           \        currency = \"%s\", \n\
           \        industry = \"%s\",\n\
           \        sector = \"%s\",\n\
           \        country = \"%s\",\n\
           \        pullable = \"%s\"\n\
-          \ Where symbol = \"%s\";" price beta div_yield market_cap currency industry
+          \ Where symbol = \"%s\";" beta div_yield shares currency industry
           sector country pullable ticker
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
@@ -257,7 +256,54 @@ let update_financials ticker financials =
   | "OK" -> ()
   | code -> print_endline code
 
-let update_price ticker (price, market_cap, pe) =
+  
+let update_pe_ttm ticker =
+  let stock_exists = row_exists "Stocks" "symbol" ticker in
+  match stock_exists with
+  | false -> ()
+  | true -> (
+      let sql =
+        Printf.sprintf "
+      WITH fin_ratios as (
+      	SELECT DISTINCT Financials.symbol, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
+      	FROM Financials 
+      		LEFT JOIN Currencies
+      	ON Financials.currency = Currencies.currency
+      ),
+      price_ratios as (
+      	SELECT s.symbol, CASE WHEN s.currency = \"EUR\" OR c.ratio IS NULL THEN 1.0 ELSE c.ratio END AS ratio
+      	FROM STOCKS s 
+      		LEFT JOIN Currencies c
+      	ON s.currency = c.currency
+      )
+      UPDATE Stocks
+      SET pe = (
+      SELECT (s.price * pr.ratio)/ (SUM(et.net_income * fr.ratio) / s.shares)
+      FROM (
+      	SELECT 
+      		symbol
+      		, net_income
+      		, year
+      	FROM Financials e
+      		WHERE e.symbol = STOCKS.symbol AND period = \"FQ\"
+      	ORDER BY year DESC
+      	LIMIT 4) AS et
+      LEFT JOIN Stocks s
+      		ON et.symbol = s.symbol
+      LEFT JOIN fin_ratios fr
+      	ON s.symbol = fr.symbol
+      LEFT JOIN price_ratios pr
+      	ON s.symbol = pr.symbol
+      GROUP BY s.symbol)
+      WHERE Stocks.symbol = \"%s\"
+        " ticker
+      in
+      let updated = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+      match updated with
+      | "OK" -> ()
+      | code -> print_endline code)
+
+let update_price ticker price =
   let stock_exists = row_exists "Stocks" "symbol" ticker in
   match stock_exists with
   | false -> ()
@@ -265,22 +311,20 @@ let update_price ticker (price, market_cap, pe) =
       let sql =
         Printf.sprintf
           "UPDATE Stocks Set\n\
-          \        price = %f,\n\
-          \        market_cap = %i,\n\
-          \        pe = %f\n\
+          \        price = %f\n\
           \ \n\
-          \         Where symbol = \"%s\";" price market_cap pe ticker
+          \         Where symbol = \"%s\";" price ticker
       in
       let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
       match inserted with
-      | "OK" -> ()
+      | "OK" -> update_pe_ttm ticker
       | code -> print_endline code)
 
 let select_ratings_data () =
   let sql =
     Printf.sprintf "
     SELECT
-      s.symbol as ss, s.industry, s.sector, s.market_cap * s.ratio,
+      s.symbol as ss, s.industry, s.sector, s.shares * 1.0,
       s.pe, s.price * s.ratio, f.total_debt * f.ratio,
       c.tax, c.bonds_rate, s.status, s.target, s.div_yield, MAX(f.year) as ye
     FROM (
@@ -309,7 +353,7 @@ let select_ratings_data () =
     match data with
     | hd :: tl -> (
         match hd with
-        | tick_symbol :: industry :: sector :: market_cap :: pe :: price
+        | tick_symbol :: industry :: sector :: shares :: pe :: price
           :: debt :: tax 
           :: bond_rate :: status :: target :: div_yield :: _ ->
           (try 
@@ -317,7 +361,7 @@ let select_ratings_data () =
               ( Sqlite3.Data.to_string_exn tick_symbol,
                 Sqlite3.Data.to_string_exn industry,
                 Sqlite3.Data.to_string_exn sector,
-                Sqlite3.Data.to_float_exn market_cap,
+                Sqlite3.Data.to_float_exn shares,
                 Sqlite3.Data.to_float_exn pe,
                 Sqlite3.Data.to_float_exn price,
                 Sqlite3.Data.to_float_exn debt,
@@ -330,8 +374,10 @@ let select_ratings_data () =
             ]
             @ results tl
           with
-          | _ ->
+          | a -> 
+            let b = Exn.to_string a in
             printf "%s has bad data\n" (Sqlite3.Data.to_string_exn tick_symbol);
+            printf "Error : %s\n" b;
             [] @ results tl)
         | _ -> [])
     | [] -> []
@@ -638,24 +684,25 @@ let select_first_and_last_fcf () =
       )
     "
   in  
-  let n = [2; 3; 4; 5; 6] in
+  let n = [2; 3; 4; 5; 6; 7; 8; 9; 10] in
   let n_year_max_min = List.map n ~f:(fun x ->  
-  Printf.sprintf " 
-		SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
+  Printf.sprintf "  
+  	SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
         FROM (
         	SELECT symbol, free_cash_flow, n, max(year)
         	FROM 
         	temp_table 
-			WHERE n <= %d
         	Group by symbol) a
         LEFT JOIN (
-        	SELECT symbol, free_cash_flow, n, min(year) 
+        	SELECT symbol, free_cash_flow, n
         	FROM 
         	temp_table
-			WHERE n <= %d
+    			WHERE n = %d
         	Group by symbol) b 
       	ON b.symbol = a.symbol
-      	" x x ^ (if not (Int.(=) x 6) then "Union" else ""))
+		WHERE NOT (b.free_cash_flow IS NULL OR b.n IS NULL) 
+
+      	" x ^ (if not (Int.(=) x 10) then "Union" else ""))
   in
   let sql = cashflow_window_10y ^ String.concat n_year_max_min  ^  " ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
@@ -684,8 +731,11 @@ let delete_stock ticker_symbol =
     DELETE FROM Ratings WHERE symbol = \"%s\";
     DELETE FROM Speculative_data WHERE symbol = \"%s\";
     DELETE FROM Earnings WHERE symbol = \"%s\";
+    DELETE FROM Dividends WHERE symbol = \"%s\";
+    DELETE FROM Splits WHERE symbol = \"%s\";
+    DELETE FROM Historical_prices WHERE symbol = \"%s\";
     DELETE FROM Stocks WHERE symbol = \"%s\";
-    " ticker_symbol ticker_symbol ticker_symbol ticker_symbol ticker_symbol
+    " ticker_symbol ticker_symbol ticker_symbol ticker_symbol ticker_symbol ticker_symbol ticker_symbol ticker_symbol
   in
   let deleted =
     Sqlite3.exec db sql |> Sqlite3.Rc.to_string
@@ -765,13 +815,13 @@ let select_eps_growth () =
       )
     "
   in  
-  let n = [2; 3; 4; 5; 6; 7] in
+  let n = [2; 3; 4; 5; 6; 7; 8; 9; 10] in
   let n_year_growth = List.map n ~f:(fun x ->  
   Printf.sprintf " 
   SELECT a.symbol, 
   	CASE 
-  	WHEN NOT (pow((a.eps - b.eps)/abs(B.eps)+1.0, 1.0 / b.n) - 1.0) IS NULL 
-  		THEN pow((a.eps - b.eps)/abs(B.eps)+1.0, 1.0 / b.n) - 1.0
+  	WHEN NOT (pow((a.eps - b.eps)/abs(b.eps)+1.0, 1.0 / b.n) - 1.0) IS NULL 
+  		THEN pow((a.eps - b.eps)/abs(b.eps)+1.0, 1.0 / b.n) - 1.0
   	ELSE 0.0
   	END,
   	 b.n
@@ -779,16 +829,17 @@ let select_eps_growth () =
           	SELECT symbol, eps, n, max(year)
           	FROM 
           	temp_table 
-  			WHERE n <= %d
           	Group by symbol) a
           LEFT JOIN (
-          	SELECT symbol, eps, n, min(year) 
+          	SELECT symbol, eps, n 
           	FROM 
           	temp_table
-  			WHERE n <= %d
+  			WHERE n = %d
           	Group by symbol) b 
         	ON b.symbol = a.symbol
-   	" x x ^ (if not (Int.(=) x 7) then "Union" else ""))
+		WHERE NOT (b.eps IS NULL OR b.n IS NULL)
+
+    	" x ^ (if not (Int.(=) x 10) then "Union" else ""))
   in
   let sql = eps_window ^ String.concat n_year_growth ^ "ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
@@ -855,7 +906,13 @@ let update_targets () =
     	   RowAsc IN (RowDesc, RowDesc - 1, RowDesc + 1)
     ),
     new_targets AS (
-    	SELECT r.symbol, round(1.0 + sm.median * 0.1 + im.median * 0.2 - m.median * 0.2 , 3) as med_target, r.base_rating, im.median, sm.median, m.median
+      SELECT 
+      	r.symbol
+      	, round(1 + sm.median * 0.08 + im.median * 0.12 - (1 - r.base_rating / m.median) * 0.6, 3) as med_target
+      	, r.base_rating
+      	, sm.median
+      	, im.median
+      	, m.median
     	FROM Ratings r
     	LEFT JOIN Stocks s
     		ON r.symbol = s.symbol
