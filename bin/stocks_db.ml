@@ -148,6 +148,25 @@ let insert_ratings symbol base_rating target_rating =
           printf "%s error: " symbol;
           print_endline code)
   
+let clean_up_financials_currency () =
+  let sql = "
+    WITH cur AS (
+    	Select symbol, currency from Financials where symbol IN
+    		(Select symbol from Financials where currency = \"None\") 
+    		AND NOT currency =\"None\"
+    	GROUP by symbol
+    )
+    UPDATE Financials
+    SET currency = cur.currency
+    FROM cur
+    WHERE Financials.symbol = cur.symbol
+    "
+  in
+  let cleaned_up = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
+  match cleaned_up with
+  | "OK" -> ()
+  | code -> printf "Failed forex cleanup: error %s" code
+
 let insert_country country =
   let exists = row_exists "Countries" "country" country in
   match exists with
@@ -253,7 +272,7 @@ let update_financials ticker financials =
   let sql = base_sql ^ gen_sql financials in
   let inserted = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
   match inserted with
-  | "OK" -> ()
+  | "OK" ->  clean_up_financials_currency ();
   | code -> print_endline code
 
   
@@ -551,24 +570,6 @@ let update_speculations symbol growth return moat =
       | code -> printf "Update failed: error %s" code)
   | code -> print_endline code
 
-let clean_up_financials_currency () =
-  let sql = "
-    WITH cur AS (
-    	Select symbol, currency from Financials where symbol IN
-    		(Select symbol from Financials where currency = \"None\") 
-    		AND NOT currency =\"None\"
-    	GROUP by symbol
-    )
-    UPDATE Financials
-    SET currency = cur.currency
-    FROM cur
-    WHERE Financials.symbol = cur.symbol
-    "
-  in
-  let cleaned_up = Sqlite3.exec db sql |> Sqlite3.Rc.to_string in
-  match cleaned_up with
-  | "OK" -> ()
-  | code -> printf "Failed forex cleanup: error %s" code
 
 let insert_forex names prices =
     let rec f names prices =
@@ -619,70 +620,14 @@ let select_currencies () =
     |> String.concat)
 
 let select_first_and_last_fcf () =
-      let cashflow_window_10y = 
-      "WITH A AS (
-       SELECT Rank, f.year, f.symbol, CAST(f.free_cash_flow * 1.0 * ratio AS INT) as free_cash_flow, min_year
-        FROM (
-      	SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
-          substr(f.year, 1, 4) as year, 
-      	f.symbol, 
-      	f.free_cash_flow, 
-      	min(substr(f.year, 1, 4)) over (PARTITION BY f.symbol) as min_year
-      	FROM Financials f
-      	WHERE period = \"FQ\") f
-        LEFT JOIN (
-      	SELECT DISTINCT Financials.symbol, CASE WHEN Financials.currency = \"EUR\" OR Currencies.ratio IS NULL THEN 1.0 ELSE Currencies.ratio END AS ratio
-      	FROM Financials 
-      	LEFT JOIN Currencies
-      	ON Financials.currency = Currencies.currency
-      	WHERE period = \"FQ\") b
-      	ON f.symbol = b.symbol
-        WHERE not min_year = year
-      ),
-      count_reports_per_year AS (
-      	SELECT symbol, year, COUNT(Rank) as reports, 
-      	LAG(COUNT(Rank)) OVER (PARTITION BY symbol ORDER BY symbol, year) as prev_year_report_n
-      	FROM A
-      	GROUP BY year, symbol
-      ),
-      T AS (
-        SELECT A.*, c.reports, c.prev_year_report_n
-        FROM A
-        INNER JOIN count_reports_per_year c
-      	on A.year = c.year AND A.symbol = c.symbol
-      ),
-      sum_of_q AS (
-      	SELECT symbol, year, free_cash_flow
-      	FROM (
-      		SELECT symbol, substr(f.year, 1, 4) as year, sum(free_cash_flow) as free_cash_flow
-      		FROM Financials f
-      		WHERE period = \"FY\"
-      		GROUP BY year, symbol
-      		ORDER BY symbol, year DESC)
-      	UNION
-      	SELECT symbol, year, sum(free_cash_flow) as free_cash_flow
-      	FROM (
-      		SELECT l.year, l.symbol, l.free_cash_flow, k.prev_year_report_n, ROW_NUMBER() OVER (PARTITION BY l.symbol ORDER BY l.year DESC) AS n
-      			FROM T as l
-      		LEFT JOIN (
-      			SELECT max(year) as year, symbol, prev_year_report_n
-      			FROM T
-      			GROUP BY Symbol) as k
-      		ON k.symbol = l.symbol 
-      	)
-      	WHERE n <= prev_year_report_n
-      	Group by symbol
-      	ORDER BY symbol, year DESC
-	
-      ),  
-      temp_table AS (
-      SELECT f.symbol, f.year, f.free_cash_flow, n
-      	FROM (
-      		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
-      		FROM sum_of_q
-      	) AS f
-      )
+  let temp_table = 
     "
+    DROP TABLE IF EXISTS Temp_dcf;
+    CREATE TEMPORARY TABLE Temp_dcf AS
+    SELECT *
+    FROM DCF_data;
+    "
+      
   in  
   let n = [2; 3; 4; 5; 6; 7; 8; 9; 10] in
   let n_year_max_min = List.map n ~f:(fun x ->  
@@ -691,12 +636,12 @@ let select_first_and_last_fcf () =
         FROM (
         	SELECT symbol, free_cash_flow, n, max(year)
         	FROM 
-        	temp_table 
+        	Temp_dcf
         	Group by symbol) a
         LEFT JOIN (
         	SELECT symbol, free_cash_flow, n
         	FROM 
-        	temp_table
+        	Temp_dcf
     			WHERE n = %d
         	Group by symbol) b 
       	ON b.symbol = a.symbol
@@ -704,7 +649,8 @@ let select_first_and_last_fcf () =
 
       	" x ^ (if not (Int.(=) x 10) then "Union" else ""))
   in
-  let sql = cashflow_window_10y ^ String.concat n_year_max_min  ^  " ORDER BY a.symbol ASC, b.n ASC;" in
+  let _ = Sqlite3.exec db temp_table in
+  let sql = String.concat n_year_max_min  ^  " ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
   let data = fetch_results stmt in
   let rec results data =
@@ -745,76 +691,15 @@ let delete_stock ticker_symbol =
   | code -> printf "Error: %s\n" code
 
 let select_eps_growth () =
-    let eps_window = "
-      WITH A AS (
-       SELECT Rank, f.year, f.full_date, f.symbol, f.eps, min_year
-        FROM (
-      	SELECT RANK() OVER (ORDER BY substr(f.year, 1, 4), symbol) Rank,
-          substr(f.year, 1, 4) as year, 
-      	f.year as full_date,
-      	f.symbol, 
-      	f.eps, 
-      	min(substr(f.year, 1, 4)) over (PARTITION BY f.symbol) as min_year
-      	FROM Earnings f
-      	WHERE period = \"FQ\"
-      	ORDER BY f.year) f
-        WHERE not min_year = year and year > \"2014\"
-      ),
-      count_reports_per_year AS (
-      	SELECT symbol, year, COUNT(Rank) as reports, 
-      	LAG(COUNT(Rank)) OVER (PARTITION BY symbol ORDER BY symbol, year) as prev_year_report_n
-      	FROM A
-      	GROUP BY year, symbol
-      ),
-      T AS (
-        SELECT A.*, c.reports, c.prev_year_report_n
-        FROM A
-        INNER JOIN count_reports_per_year c
-      	on A.year = c.year AND A.symbol = c.symbol
-      ),
-      sum_of_q AS (
-      	SELECT symbol, year, eps
-      	FROM (
-      		SELECT f.symbol, substr(f.year, 1, 4) as year, f.eps 
-      		FROM Earnings f
-      		WHERE period = \"FY\" AND year > \"2014\"
-      		ORDER BY f.symbol, year DESC)
-      	UNION
-      	SELECT symbol, year, sum(eps) as eps
-      	FROM (
-				
-      		SELECT l.year, l.full_date, l.symbol, l.eps, k.prev_year_report_n, ROW_NUMBER() OVER (PARTITION BY l.symbol ORDER BY l.year DESC) AS n
-      			FROM T as l
-      		LEFT JOIN (
-      			SELECT max(year) as year, symbol, prev_year_report_n
-      			FROM T
-      			GROUP BY Symbol) as k
-      		ON k.symbol = l.symbol 
-      		ORDER BY l.symbol, full_date desc
-      	)
-      	WHERE n <= prev_year_report_n
-      	Group by symbol
-      	ORDER BY symbol, year DESC
-	
-      ),  
-      latest_eps_check AS (
-      SELECT symbol, year, eps
-      FROM ( 
-      	SELECT *, MAX(eps) OVER (PARTITION BY symbol, year) AS max_eps, 
-      	lag(eps) OVER (PARTITION BY symbol ORDER BY symbol, year) AS lag_eps,
-      	lag(year) OVER (PARTITION BY symbol ORDER BY symbol, year) AS lag_year
-      	FROM sum_of_q) as f
-      	WHERE eps = max_eps AND NOT (lag_eps = eps AND lag_year = year)
-       ),
-      temp_table AS (
-      SELECT f.symbol, f.year, f.eps, n
-      	FROM (
-      		SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY year DESC) AS n
-      		FROM latest_eps_check
-      	) AS f
-      )
-    "
-  in  
+  (* improves performace 30x *)
+  let temp_table = "
+    BEGIN TRANSACTION;
+    DROP TABLE IF EXISTS Temp_lynch;
+    CREATE TEMPORARY TABLE Temp_Lynch AS
+    SELECT symbol, eps, n, year
+    FROM Peter_Lynch_data; 
+  "
+  in
   let n = [2; 3; 4; 5; 6; 7; 8; 9; 10] in
   let n_year_growth = List.map n ~f:(fun x ->  
   Printf.sprintf " 
@@ -828,20 +713,21 @@ let select_eps_growth () =
           FROM (
           	SELECT symbol, eps, n, max(year)
           	FROM 
-          	temp_table 
+          	Peter_Lynch_data
           	Group by symbol) a
           LEFT JOIN (
           	SELECT symbol, eps, n 
           	FROM 
-          	temp_table
+          	Peter_Lynch_data
   			WHERE n = %d
           	Group by symbol) b 
         	ON b.symbol = a.symbol
-		WHERE NOT (b.eps IS NULL OR b.n IS NULL)
+		WHERE NOT (b.eps IS NULL OR b.n IS NULL) 
 
     	" x ^ (if not (Int.(=) x 10) then "Union" else ""))
   in
-  let sql = eps_window ^ String.concat n_year_growth ^ "ORDER BY a.symbol ASC, b.n ASC;" in
+  let _ = Sqlite3.exec db temp_table in
+  let sql =  String.concat n_year_growth ^ " ORDER BY a.symbol ASC, b.n ASC;" in
   let stmt = Sqlite3.prepare db sql in
   let data = fetch_results stmt in
   let rec results data =
@@ -859,7 +745,8 @@ let select_eps_growth () =
         | _ -> [])
     | [] -> []
   in
-  results data
+  results data 
+  
 
 let update_targets () =
   let sql = "
