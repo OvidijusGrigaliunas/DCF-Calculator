@@ -17,10 +17,10 @@ let rec find_bad_arguments available_args args =
             let is_argument_good = argument_exists hd1 arg in
             match is_argument_good with
             | true -> []
-            | false -> [] @ loop tl1 arg)
+            | false -> loop tl1 arg)
         | [] -> [ arg ]
       in
-      loop available_args hd @ find_bad_arguments available_args tl
+      loop available_args hd :: find_bad_arguments available_args tl
 
 let check_for_arg_dupes available_args args =
   let rec count_dupes available_args args =
@@ -123,6 +123,7 @@ let stocks_command_parser args =
           ("update", "Args: price, stock, forex, targets");
           ("rate", "Args: fair, under, low, cheap, owned, target, saved");
           ("pull", "");
+          ("backtest", "");
         ]
       in
       print_commands stock_commands
@@ -144,7 +145,8 @@ let stocks_command_parser args =
           printf "%s was succesfuly pulled \n%!" (String.uppercase ticker_symbol)
       | _ -> print_endline "Ticker symbol needed")
   | "remove" :: tl -> delete_parser tl;
-  | "rm" :: tl -> delete_parser tl
+  | "rm" :: tl -> delete_parser tl;
+  | "backtest" :: _ -> Backtest.backtest ();
   | "update" :: tl -> (
       let bad_args_exists = check_for_bad_arguments "update" tl in
       match bad_args_exists with

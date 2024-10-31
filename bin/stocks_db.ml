@@ -63,12 +63,12 @@ let select_stocks_symbols ?(pull=true) () =
     match data with
     | hd :: tl -> (
         match hd with
-        | symbol :: _ -> [ Sqlite3.Data.to_string symbol ] @ results tl
+        | symbol :: _ ->  Sqlite3.Data.to_string symbol :: results tl
         | [] -> [])
     | [] -> []
   in
   let rec clean_up data =
-    match data with Some hd :: tl -> [ hd ] @ clean_up tl | _ -> []
+    match data with Some hd :: tl ->  hd ::  clean_up tl | _ -> []
   in
   results sql_data |> clean_up
 
@@ -376,28 +376,25 @@ let select_ratings_data () =
           :: debt :: tax 
           :: bond_rate :: status :: target :: div_yield :: _ ->
           (try 
-            [
-              ( Sqlite3.Data.to_string_exn tick_symbol,
-                Sqlite3.Data.to_string_exn industry,
-                Sqlite3.Data.to_string_exn sector,
-                Sqlite3.Data.to_float_exn shares,
-                Sqlite3.Data.to_float_exn pe,
-                Sqlite3.Data.to_float_exn price,
-                Sqlite3.Data.to_float_exn debt,
-                Sqlite3.Data.to_float_exn tax,
-                Sqlite3.Data.to_float_exn bond_rate, 
-                Sqlite3.Data.to_string_exn status,
-                Sqlite3.Data.to_float_exn target,
-                Sqlite3.Data.to_float_exn div_yield
-                );
-            ]
-            @ results tl
+            ( Sqlite3.Data.to_string_exn tick_symbol,
+              Sqlite3.Data.to_string_exn industry,
+              Sqlite3.Data.to_string_exn sector,
+              Sqlite3.Data.to_float_exn shares,
+              Sqlite3.Data.to_float_exn pe,
+              Sqlite3.Data.to_float_exn price,
+              Sqlite3.Data.to_float_exn debt,
+              Sqlite3.Data.to_float_exn tax,
+              Sqlite3.Data.to_float_exn bond_rate, 
+              Sqlite3.Data.to_string_exn status,
+              Sqlite3.Data.to_float_exn target,
+              Sqlite3.Data.to_float_exn div_yield
+              ) :: results tl
           with
           | a -> 
             let b = Exn.to_string a in
             printf "%s has bad data\n" (Sqlite3.Data.to_string_exn tick_symbol);
             printf "Error : %s\n" b;
-            [] @ results tl)
+            results tl)
         | _ -> [])
     | [] -> []
   in
@@ -627,7 +624,6 @@ let select_first_and_last_fcf () =
     SELECT *
     FROM DCF_data;
     "
-      
   in  
   let n = [3; 4; 5; 6; 7; 8; 9] in
   let n_year_max_min = List.map n ~f:(fun x ->  
@@ -658,14 +654,12 @@ let select_first_and_last_fcf () =
     | hd :: tl -> (
         match hd with
         | tick_symbol :: new_free_cash_flow :: old_free_cash_flow :: duration :: _ ->
-            [
-              ( Sqlite3.Data.to_string_exn tick_symbol,
-                Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int,
-                Sqlite3.Data.to_int_exn old_free_cash_flow |> Float.of_int,
-                Sqlite3.Data.to_int_exn duration |> Float.of_int
-                );
-            ]
-            @ results tl
+            
+          ( Sqlite3.Data.to_string_exn tick_symbol,
+            Sqlite3.Data.to_int_exn new_free_cash_flow |> Float.of_int,
+            Sqlite3.Data.to_int_exn old_free_cash_flow |> Float.of_int,
+            Sqlite3.Data.to_int_exn duration |> Float.of_int
+            ) :: results tl
         | _ -> [])
     | [] -> []
   in
@@ -734,13 +728,10 @@ let select_eps_growth () =
     | hd :: tl -> (
         match hd with
         | tick_symbol :: eps_growth :: duration :: _ ->
-            [
-              ( Sqlite3.Data.to_string_exn tick_symbol,
-                Sqlite3.Data.to_float_exn eps_growth,
-                Sqlite3.Data.to_int_exn duration |> Float.of_int
-                );
-            ]
-            @ results tl
+          ( Sqlite3.Data.to_string_exn tick_symbol,
+            Sqlite3.Data.to_float_exn eps_growth,
+            Sqlite3.Data.to_int_exn duration |> Float.of_int
+            ) :: results tl
         | _ -> [])
     | [] -> []
   in

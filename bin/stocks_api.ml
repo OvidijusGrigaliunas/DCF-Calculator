@@ -130,7 +130,7 @@ let extract_data_fin key (income_json, balance_json, cashflow_json) =
           assests.(i), 
           debt.(i),
           currency.(i)) in
-        [financial] @ loop (i + 1) max_i
+        financial :: loop (i + 1) max_i
         )
       else []
   in
@@ -153,7 +153,7 @@ let extract_data_eps key earnings_json =
          let financial = (year.(i),
             time,
             eps.(i)) in
-          [financial] @ loop (i + 1) max_i
+          financial :: loop (i + 1) max_i
           )
         else []
     in
@@ -172,7 +172,7 @@ let extract_data_div dividends_json =
          let dividends =
            (year.(i),
             amount.(i)) in
-          [dividends] @ loop (i + 1) max_i
+          dividends :: loop (i + 1) max_i
           )
         else []
     in
@@ -203,7 +203,7 @@ let extract_data_splits splits_json =
     let arr_length = Array.length amount in
     let rec loop i max_i =
       if max_i > i then (
-         [(year.(i), amount.(i))] @ loop (i + 1) max_i
+         (year.(i), amount.(i)) :: loop (i + 1) max_i
         )
       else []
     in
@@ -293,7 +293,7 @@ let update_forex () =
   let currencies = Stocks_db.select_currencies () in
   let rec loop currencies =
     match currencies with
-    | "None" :: tl -> [] @ loop tl
+    | "None" :: tl -> loop tl
     | hd :: tl ->
       let end_point = Printf.sprintf "CURRENCY_EXCHANGE_RATE&from_currency=%s&to_currency=EUR" hd in
       let f body = body in
@@ -304,7 +304,7 @@ let update_forex () =
       let price =
         extract_from_json ~key:"Realtime Currency Exchange Rate" data "5. Exchange Rate" to_float_exn
       in     
-      [(price, name)] @ loop tl
+      (price, name) :: loop tl
     | [] -> []
   in
   let names_prices_list = loop currencies in

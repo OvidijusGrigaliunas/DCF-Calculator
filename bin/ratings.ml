@@ -1,9 +1,8 @@
 open Base
 open Stdio
 
-
 let calc_eq_discount ?(expected_return = 0.15) pe market_cap debt =
-  let ep_disc = (338.0 +. pe) /. 350.0 in
+  let ep_disc = (308.0 +. pe) /. 320.0 in
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   ep_disc *. eq_disc
 
@@ -16,14 +15,17 @@ let calc_growth new_fcf old_fcf duration =
   let growth = increase **. (1.0 /. (duration -. 1.0)) -. 1.0 in
   if Float.(<=) growth 0.0 then 0.005 else growth 
   
+let calc_industry_rating industry_risk sector_risk =
+  let industry_and_sector_risk =
+    (industry_risk +. sector_risk) /. 6.6 +. 0.85
+  in
+  industry_and_sector_risk 
+
 let get_industry_rating industry sector =
   let industry_risk, sector_risk =
     Stocks_db.select_sector_and_industry sector industry
   in
-  let industry_and_sector_risk =
-    (industry_risk +. sector_risk) /. 20.0 +. 0.95
-  in
-  industry_and_sector_risk 
+  calc_industry_rating industry_risk sector_risk
 
 let calc_discount market_cap pe debt tax bond_rate
     industry_rating =
@@ -44,11 +46,11 @@ let calc_DFCA cash_flow growth discount =
         cash_flow_growth /. ((1.0 +. discount) **. year)
       in
       let new_limiter = limiter -. Float.abs growth in
-      [(cash_flow_growth, cash_flow_discounted)]
-       @ loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier 
+      (cash_flow_growth, cash_flow_discounted)
+       :: loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier 
     ) 
   in
-  let multiplier = 0.88 -. Float.abs(growth) **. 0.1 /. 4.0 in
+  let multiplier = 0.83 -. Float.abs(growth) **. 0.1 /. 4.0 in
   let dcf_list = loop cash_flow 0.0 0.6 growth multiplier |> List.rev in
   let growth_10y = 
     match dcf_list with
@@ -210,7 +212,7 @@ let rate_stocks ?(filter = "none") stock_data =
         in
         let pl_value_avg=
           let sum = List.fold pl_values ~init:0.0 ~f:(+.) in
-          sum /. (Float.of_int (List.length dcf_upsides))
+          sum /. (Float.of_int (List.length pl_values))
         in
         let intrinsic_price = get_intrinsic_price price dcf_upside_avg pl_value_avg in
         let rating, target_rating = rate_stock_price intrinsic_price price target in
@@ -224,7 +226,7 @@ let rate_stocks ?(filter = "none") stock_data =
         | hd -> filter_by_status status hd 
         in
         if is_printable then
-          [ (tick_symbol, target_rating, price) ] @ ratings filter tl
+           (tick_symbol, target_rating, price) :: ratings filter tl
         else ratings filter tl
       )
       with 
