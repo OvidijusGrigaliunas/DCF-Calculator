@@ -629,7 +629,7 @@ let select_first_and_last_fcf () =
     "
       
   in  
-  let n = [2; 3; 4; 5; 6; 7; 8; 9; 10] in
+  let n = [3; 4; 5; 6; 7; 8; 9] in
   let n_year_max_min = List.map n ~f:(fun x ->  
   Printf.sprintf "  
   	SELECT a.symbol, a.free_cash_flow, b.free_cash_flow, b.n
@@ -647,7 +647,7 @@ let select_first_and_last_fcf () =
       	ON b.symbol = a.symbol
 		WHERE NOT (b.free_cash_flow IS NULL OR b.n IS NULL) 
 
-      	" x ^ (if not (Int.(=) x 10) then "Union" else ""))
+      	" x ^ (if not (Int.(=) x 9) then "Union" else ""))
   in
   let _ = Sqlite3.exec db temp_table in
   let sql = String.concat n_year_max_min  ^  " ORDER BY a.symbol ASC, b.n ASC;" in
@@ -693,14 +693,13 @@ let delete_stock ticker_symbol =
 let select_eps_growth () =
   (* improves performace 30x *)
   let temp_table = "
-    BEGIN TRANSACTION;
     DROP TABLE IF EXISTS Temp_lynch;
     CREATE TEMPORARY TABLE Temp_Lynch AS
     SELECT symbol, eps, n, year
     FROM Peter_Lynch_data; 
   "
   in
-  let n = [2; 3; 4; 5; 6; 7; 8; 9; 10] in
+  let n = [3; 4; 5; 6; 7; 8; 9] in
   let n_year_growth = List.map n ~f:(fun x ->  
   Printf.sprintf " 
   SELECT a.symbol, 
@@ -713,18 +712,18 @@ let select_eps_growth () =
           FROM (
           	SELECT symbol, eps, n, max(year)
           	FROM 
-          	Peter_Lynch_data
+          	Temp_lynch
           	Group by symbol) a
           LEFT JOIN (
           	SELECT symbol, eps, n 
           	FROM 
-          	Peter_Lynch_data
+          	Temp_lynch
   			WHERE n = %d
           	Group by symbol) b 
         	ON b.symbol = a.symbol
 		WHERE NOT (b.eps IS NULL OR b.n IS NULL) 
 
-    	" x ^ (if not (Int.(=) x 10) then "Union" else ""))
+    	" x ^ (if not (Int.(=) x 9) then "Union" else ""))
   in
   let _ = Sqlite3.exec db temp_table in
   let sql =  String.concat n_year_growth ^ " ORDER BY a.symbol ASC, b.n ASC;" in
