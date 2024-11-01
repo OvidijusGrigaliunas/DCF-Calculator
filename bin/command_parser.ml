@@ -17,10 +17,10 @@ let rec find_bad_arguments available_args args =
             let is_argument_good = argument_exists hd1 arg in
             match is_argument_good with
             | true -> []
-            | false -> loop tl1 arg)
+            | false -> [] @ loop tl1 arg)
         | [] -> [ arg ]
       in
-      loop available_args hd :: find_bad_arguments available_args tl
+      loop available_args hd @ find_bad_arguments available_args tl
 
 let check_for_arg_dupes available_args args =
   let rec count_dupes available_args args =
