@@ -218,7 +218,8 @@ let update_splits () =
      Stdio.Out_channel.flush stdout;
      get_splits symbol
      |> extract_data_splits
-     |> Stocks_db.update_splits symbol 
+     |> Stocks_db.update_splits symbol; 
+     Thread.delay 0.2
      );
   printf "\r\n";
   Stdio.Out_channel.flush stdout

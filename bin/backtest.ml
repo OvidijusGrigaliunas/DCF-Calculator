@@ -16,7 +16,6 @@ type t = {
   eps_growth: float;
   date: string;
   price: float;
-  base_price: float;
   debt: float;
   tax: float;
   bond_rate: float; 
@@ -34,7 +33,6 @@ let fetch_backtest_data () =
       	, ttm_cashflow
       	, cashflow_growth
       	, div_yield
-      	, base_price
       	, price
       	, \"date\"
       	, shares
@@ -63,7 +61,7 @@ let fetch_backtest_data () =
         match result with
         |	symbol :: prev_net_income :: ttm_net_income
           :: prev_cashflow :: ttm_cashflow :: cashflow_growth :: div_yield
-          :: base_price :: price :: date :: shares
+          :: price :: date :: shares
         	:: industry :: sector :: eps_growth 
         	:: prev_non_gaap_eps :: ttm_non_gaap_eps
         	:: debt :: tax :: bond_rate :: _  ->
@@ -83,7 +81,6 @@ let fetch_backtest_data () =
               eps_growth = Sqlite3.Data.to_float_exn eps_growth;
               date = Sqlite3.Data.to_string_exn date;
               price = Sqlite3.Data.to_float_exn price;
-              base_price = Sqlite3.Data.to_float_exn base_price;
               debt = Sqlite3.Data.to_float_exn debt;
               tax = Sqlite3.Data.to_float_exn tax;
               bond_rate = Sqlite3.Data.to_float_exn bond_rate;
@@ -99,10 +96,10 @@ let fetch_backtest_data () =
   f []
 
 let calc_pe (t : t) =
-  t.base_price /. (t.ttm_net_income /. t.shares)
+  t.price /. (t.ttm_net_income /. t.shares)
 
 let calc_dcf_upside (t : t) pe =
-  let market_cap = Ratings.calc_market_cap t.base_price t.shares in
+  let market_cap = Ratings.calc_market_cap t.price t.shares in
   let industry_rating = Ratings.calc_industry_rating t.industry_risk t.sector_risk in
   let discount = Ratings.calc_discount market_cap pe t.debt t.tax t.bond_rate industry_rating in
   let intrinsic_value = Ratings.calc_intrinsic_value pe t.ttm_cashflow t.cashflow_growth discount in
@@ -137,14 +134,8 @@ let delete_ratings () =
   match deleted with
   | "OK" -> ()
   | code -> printf "Error deleting backtest ratings: %s\n%!" code
-  
-      
-let backtest () =
-  let start_time = Unix.gettimeofday () in
-  print_endline "Extracting data";
-  delete_ratings ();
-  let ratings_data = fetch_backtest_data () in
-  printf "\rData extracted in %.0f seconds\n%!" (Unix.gettimeofday () -. start_time);
+
+let rate_stocks ratings_data =
   let start_time = Unix.gettimeofday () in
   let data_length = List.length ratings_data |> Float.of_int in
   let data_left = ref data_length in
@@ -171,7 +162,6 @@ let backtest () =
       let data_set : (t list) = hd :: same_symbols in
       let data_set_length = List.length data_set |> Float.of_int in
       let pe = calc_pe hd in
-      printf "%s pe: %f\n%!" hd.date pe;
       let dcf_upsides = List.map data_set ~f:(
         fun (x : t) -> calc_dcf_upside x pe
       )          
@@ -189,10 +179,10 @@ let backtest () =
         /. data_set_length
       in
       let intrinsic_price =
-        Ratings.get_intrinsic_price hd.base_price dcf_upside_avg pl_value_avg
+        Ratings.get_intrinsic_price hd.price dcf_upside_avg pl_value_avg
        in
       let rating, _ =
-         Ratings.rate_stock_price intrinsic_price hd.base_price 1.0
+         Ratings.rate_stock_price intrinsic_price hd.price 1.0
       in
 
       
@@ -215,3 +205,13 @@ let backtest () =
   
   loop ratings_data;
   printf "\rBacktest stocks rating completed in %.0f seconds\n%!" (Unix.gettimeofday () -. start_time)
+
+      
+let backtest () =
+  let start_time = Unix.gettimeofday () in
+  print_endline "Extracting data";
+  delete_ratings ();
+  let ratings_data = fetch_backtest_data () in
+  printf "\rData extracted in %.0f seconds\n%!" (Unix.gettimeofday () -. start_time);
+
+  rate_stocks ratings_data

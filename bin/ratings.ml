@@ -1,7 +1,7 @@
 open Base
 open Stdio
 
-let calc_eq_discount ?(expected_return = 0.15) pe market_cap debt =
+let calc_eq_discount ?(expected_return = 0.20) pe market_cap debt =
   let ep_disc = (308.0 +. pe) /. 320.0 in
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   ep_disc *. eq_disc
@@ -17,7 +17,7 @@ let calc_growth new_fcf old_fcf duration =
   
 let calc_industry_rating industry_risk sector_risk =
   let industry_and_sector_risk =
-    (industry_risk +. sector_risk) /. 6.6 +. 0.85
+    (industry_risk *. 0.6 +. sector_risk *. 0.4) 
   in
   industry_and_sector_risk 
 
@@ -50,8 +50,8 @@ let calc_DFCA cash_flow growth discount =
        :: loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier 
     ) 
   in
-  let multiplier = 0.83 -. Float.abs(growth) **. 0.1 /. 4.0 in
-  let dcf_list = loop cash_flow 0.0 0.6 growth multiplier |> List.rev in
+  let multiplier = 0.80 -. Float.abs(growth) **. 0.4 /. 3.0 in
+  let dcf_list = loop cash_flow 0.0 0.4 growth multiplier |> List.rev in
   let growth_10y = 
     match dcf_list with
     | (hd, _) :: _ -> hd
@@ -186,7 +186,7 @@ let rate_stocks ?(filter = "none") stock_data =
             _,
             _,
             status,
-            target,
+            _,
             div_yield ) =
         hd
       in
@@ -215,7 +215,7 @@ let rate_stocks ?(filter = "none") stock_data =
           sum /. (Float.of_int (List.length pl_values))
         in
         let intrinsic_price = get_intrinsic_price price dcf_upside_avg pl_value_avg in
-        let rating, target_rating = rate_stock_price intrinsic_price price target in
+        let rating, target_rating = rate_stock_price intrinsic_price price 1.0 in
         Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =
         match filter with
