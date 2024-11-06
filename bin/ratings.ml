@@ -13,7 +13,7 @@ let calc_growth new_fcf old_fcf duration =
   let old_fcf = if Float.(>) old_fcf 0.0 then old_fcf else new_fcf /. 1.5 in 
   let increase = (new_fcf -. old_fcf) /. Float.abs old_fcf +. 1.0 in
   let growth = increase **. (1.0 /. (duration -. 1.0)) -. 1.0 in
-  if Float.(<=) growth 0.0 then 0.005 else growth 
+  if Float.(<=) growth 0.0 || Float.is_nan growth then 0.0005 else growth 
   
 let calc_industry_rating industry_risk sector_risk =
   let industry_and_sector_risk =
@@ -214,7 +214,10 @@ let rate_stocks ?(filter = "none") stock_data =
           let sum = List.fold pl_values ~init:0.0 ~f:(+.) in
           sum /. (Float.of_int (List.length pl_values))
         in
-        let intrinsic_price = get_intrinsic_price price dcf_upside_avg pl_value_avg in
+        let intrinsic_price = match (Float.is_nan pl_value_avg) with
+          | false -> get_intrinsic_price price dcf_upside_avg pl_value_avg
+          | true -> get_intrinsic_price price dcf_upside_avg 1.8
+        in
         let rating, target_rating = rate_stock_price intrinsic_price price 1.0 in
         Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =
