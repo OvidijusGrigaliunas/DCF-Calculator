@@ -147,7 +147,9 @@ let stocks_command_parser args =
   | "remove" :: tl -> delete_parser tl;
   | "rm" :: tl -> delete_parser tl;
   | "backtest" :: _ -> 
+      print_endline "";
       Backtest_rate.backtest ();
+      Backtest_returns.backtest ();
   | "update" :: tl -> (
       let bad_args_exists = check_for_bad_arguments "update" tl in
       match bad_args_exists with

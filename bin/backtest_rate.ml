@@ -188,6 +188,10 @@ let rate_stocks ratings_data =
       
       data_left := !data_left -. data_set_length; 
       rating_count := !rating_count + 1;
+      if !rating_count % 1000 = 0 then
+      (
+      printf "\r%.1f%% %!        " (100.0 -. !data_left /. data_length *. 100.0); 
+      );
       if Int.(=) !rating_count 50000 || Float.(=) !data_left 0.0 then
       (
         Buffer.add_string rating_sql (rating_to_sql_values hd rating false);
@@ -199,7 +203,6 @@ let rate_stocks ratings_data =
       (
         Buffer.add_string rating_sql (rating_to_sql_values hd rating true);
       );
-      printf "\r%.1f%% %!        " (100.0 -. !data_left /. data_length *. 100.0); 
       loop rest_of_list
   in
   
