@@ -21,6 +21,7 @@ type t = {
   bond_rate: float; 
   div_yield: float
 }
+
 let fetch_backtest_data () =
   let sql =
     Printf.sprintf
@@ -136,7 +137,6 @@ let delete_ratings () =
   | code -> printf "Error deleting backtest ratings: %s\n%!" code
 
 let rate_stocks ratings_data =
-  let start_time = Unix.gettimeofday () in
   let data_length = List.length ratings_data |> Float.of_int in
   let data_left = ref data_length in
   let rating_sql = Buffer.create (50000 * 38) in 
@@ -203,10 +203,8 @@ let rate_stocks ratings_data =
       loop rest_of_list
   in
   
-  loop ratings_data;
-  printf "\rBacktest stocks rating completed in %.0f seconds\n%!" (Unix.gettimeofday () -. start_time)
+  loop ratings_data
 
-      
 let backtest () =
   let start_time = Unix.gettimeofday () in
   print_endline "Extracting data";
@@ -214,4 +212,6 @@ let backtest () =
   let ratings_data = fetch_backtest_data () in
   printf "\rData extracted in %.0f seconds\n%!" (Unix.gettimeofday () -. start_time);
 
-  rate_stocks ratings_data
+  let start_time = Unix.gettimeofday () in
+  rate_stocks ratings_data;
+  printf "\rBacktest stocks rating completed in %.0f seconds\n%!" (Unix.gettimeofday () -. start_time)
