@@ -15,6 +15,7 @@ let get_range value range_gap =
   in
   let r_end = r_start +. range_gap in
   (r_start, r_end)
+
 let range_equal range1 range2 =
   let start1, end1 = range1 in
   let start2, end2 = range2 in

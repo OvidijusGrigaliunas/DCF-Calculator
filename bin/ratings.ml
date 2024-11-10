@@ -51,7 +51,7 @@ let calc_DFCA cash_flow growth discount =
     ) 
   in
   let multiplier = 0.80 -. Float.abs(growth) **. 0.4 /. 3.0 in
-  let dcf_list = loop cash_flow 0.0 0.4 growth multiplier |> List.rev in
+  let dcf_list = loop cash_flow 0.0 0.3 growth multiplier |> List.rev in
   let growth_10y = 
     match dcf_list with
     | (hd, _) :: _ -> hd
@@ -87,6 +87,27 @@ let rate_stock_price intrinsic_price current_price target =
   let target_rating = rating /. target in
   (rating, target_rating)
 
+let get_posible_return symbol rating =
+  if not (Float.is_nan rating) then (
+    let sql = Printf.sprintf "
+      Select return
+      FROM Returns_of_ratings
+      WHERE symbol = \"%s\" and %f >= r_start AND %f < r_end
+      " symbol rating rating
+    in
+    let y_return =
+      Sqlite3.prepare Stocks_db.db sql
+      |> Stocks_db.fetch_results 
+      |> List.hd
+    in
+  
+    match y_return with
+    | None -> None
+    | Some hd -> 
+      List.hd_exn hd |> Sqlite3.Data.to_float
+  )
+  else None
+    
 let print_price_rating ratings =
   let max_col = 5 in
   let row_len = 34 in  
@@ -105,19 +126,19 @@ let print_price_rating ratings =
   let rec print ratings max_col col =
     match ratings with
     | hd :: tl ->
-        let ticker_symbol, discount, price = hd in
-        printf "| %*s" (-6) ticker_symbol;
-        if Float.(<) price 10.0 then
-          printf "C: %*.3f€ " (5) (price)
-        else if Float.(<) price 1000.0 then 
-          printf "C: %*.1f€ " (5) (price)
-        else 
-          printf "C: %*.0f€ " (5) (price);
+        let symbol, rating, discount, price = hd in
+        let y_return = get_posible_return symbol rating in
+        printf "| %*s" (-6) symbol;
+        (
+          match y_return with
+          | None -> printf "R: %*s%% " (5) "NaN" 
+          | Some hd -> printf "R: %*.1f%% " (5) (hd *. 100.0);
+        );
         printf "T:";
         printf "%*.0f%% " (4) (discount *. 100.0);
-        if Float.(<) (price/.discount) 10.0 then
+        if Float.(<) (price /. discount) 10.0 then
           printf "%*.3f€ " (5) (price /. discount)
-        else if Float.(<) (price/.discount) 1000.0 then
+        else if Float.(<) (price /. discount) 1000.0 then
           printf "%*.1f€ " (5) (price /. discount)
         else
           printf "%*.0f€ " (5) (price /. discount);
@@ -149,7 +170,7 @@ let calc_market_cap price shares_outstanding =
 
 let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
   let ( _,
-        industry,
+        industry, 
         sector,
         shares,
         pe,
@@ -229,7 +250,8 @@ let rate_stocks ?(filter = "none") stock_data =
         | hd -> filter_by_status status hd 
         in
         if is_printable then
-           (tick_symbol, target_rating, price) :: ratings filter tl
+            
+           (tick_symbol, rating, target_rating, price) :: ratings filter tl
         else ratings filter tl
       )
       with 
