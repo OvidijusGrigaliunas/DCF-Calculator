@@ -1,10 +1,9 @@
 open Base
 open Stdio
 
-let calc_eq_discount ?(expected_return = 0.20) pe market_cap debt =
-  let ep_disc = (308.0 +. pe) /. 320.0 in
+let calc_eq_discount ?(expected_return = 0.20) market_cap debt =
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
-  ep_disc *. eq_disc
+  eq_disc
 
 let calc_debt_discount market_cap debt tax bond_rate =
   debt /. market_cap *. bond_rate *. (1.0 -. tax)
@@ -27,9 +26,9 @@ let get_industry_rating industry sector =
   in
   calc_industry_rating industry_risk sector_risk
 
-let calc_discount market_cap pe debt tax bond_rate
+let calc_discount market_cap debt tax bond_rate
     industry_rating =
-  let eq_disc = calc_eq_discount pe market_cap debt in
+  let eq_disc = calc_eq_discount market_cap debt in
   let debt_disc = calc_debt_discount market_cap debt tax bond_rate in
   (eq_disc +. debt_disc) *. industry_rating
 
@@ -50,8 +49,10 @@ let calc_DFCA cash_flow growth discount =
        :: loop cash_flow_growth (year +. 1.0) new_limiter current_year_growth growth_multiplier 
     ) 
   in
-  let multiplier = 0.80 -. Float.abs(growth) **. 0.4 /. 3.0 in
-  let dcf_list = loop cash_flow 0.0 0.3 growth multiplier |> List.rev in
+  let limit = 0.2 in
+  let growth_limited = if Float.(<) growth limit then growth else limit in
+  let multiplier = 0.9 -. Float.abs(growth_limited) /. 3.0 in
+  let dcf_list = loop cash_flow 0.0 0.2 growth_limited multiplier |> List.rev in
   let growth_10y = 
     match dcf_list with
     | (hd, _) :: _ -> hd
@@ -61,7 +62,11 @@ let calc_DFCA cash_flow growth discount =
   (growth_10y, discount_sum)  
 
 let calc_peter_lynch_value eps_growth pe div_yield =
-  (eps_growth +. div_yield) *. 100.0 /. pe
+  let limit = 0.2 in
+  let growth = 
+    if Float.(<) eps_growth limit then eps_growth else limit 
+  in
+  (growth +. div_yield) *. 100.0 /. pe
 
 let calc_terminal_value pe growth_of_10y discount =
   let term_val = (pe *. growth_of_10y) /. ((1.0 +. discount) **. 10.0) in
@@ -168,6 +173,18 @@ let filter_under price_discount lower_treshold treshold =
 let calc_market_cap price shares_outstanding =
   price *. shares_outstanding 
 
+let time_weighted_average ls =
+  let rec loop i ls =
+    let weigth = (if i < 3 then 4 else if i < 7 then 2 else 1) |> Float.of_int in 
+    match ls with
+    | [] -> (0.0, weigth)
+    | hd :: tl ->
+      let s, w = loop (i + 1) tl in  
+     (hd *. weigth +. s, weigth +. w)
+  in
+  let sum, ind = (loop 0 ls) in
+  sum /. ind
+    
 let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
   let ( _,
         industry, 
@@ -182,7 +199,7 @@ let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
   let market_cap = calc_market_cap price shares in
   let industry_rating = get_industry_rating industry sector in
   let discount =
-    calc_discount market_cap pe debt tax bond_rate industry_rating 
+    calc_discount market_cap debt tax bond_rate industry_rating 
   in
   let growth = calc_growth new_fcf old_fcf years in
   let intrinsic_value =
@@ -219,22 +236,17 @@ let rate_stocks ?(filter = "none") stock_data =
         let dcf_upsides = List.map filtered_fl_financials ~f:(
           fun (_, b, c, d) -> get_dcf_upside hd (b, c, d);)          
         in
-        let dcf_upside_avg =
-          let sum = List.fold dcf_upsides ~init:0.0 ~f:(+.) in
-          sum /. (Float.of_int (List.length dcf_upsides))
-        in
+        let dcf_upside_avg = time_weighted_average dcf_upsides in
 
         let filtered_eps = 
           List.filter eps_growth_list ~f:(
           fun (a, _, _) -> String.(=) a tick_symbol) 
         in
         let pl_values = List.map filtered_eps ~f:(
-          fun (_, b, _) -> calc_peter_lynch_value b pe div_yield )          
+          fun (_, b, _) ->
+          calc_peter_lynch_value b pe div_yield )          
         in
-        let pl_value_avg=
-          let sum = List.fold pl_values ~init:0.0 ~f:(+.) in
-          sum /. (Float.of_int (List.length pl_values))
-        in
+        let pl_value_avg = time_weighted_average pl_values in
         let intrinsic_price = match (Float.is_nan pl_value_avg) with
           | false -> get_intrinsic_price price dcf_upside_avg pl_value_avg
           | true -> get_intrinsic_price price dcf_upside_avg 1.8

@@ -284,7 +284,8 @@ let update_all_prices () =
     (fun index symbol ->
      printf "\r%*s (%d/%d)" (-7) symbol (index + 1) total;
      Stdio.Out_channel.flush stdout;
-     update_price symbol);
+     update_price symbol;
+     Thread.delay 0.3);
   let end_time = Unix.gettimeofday () in
   printf "\rTotal time: %.2f\n" (end_time -. start);
   Stdio.Out_channel.flush stdout

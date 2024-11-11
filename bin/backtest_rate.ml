@@ -102,7 +102,7 @@ let calc_pe (t : t) =
 let calc_dcf_upside (t : t) pe =
   let market_cap = Ratings.calc_market_cap t.price t.shares in
   let industry_rating = Ratings.calc_industry_rating t.industry_risk t.sector_risk in
-  let discount = Ratings.calc_discount market_cap pe t.debt t.tax t.bond_rate industry_rating in
+  let discount = Ratings.calc_discount market_cap t.debt t.tax t.bond_rate industry_rating in
   let intrinsic_value = Ratings.calc_intrinsic_value pe t.ttm_cashflow t.cashflow_growth discount in
   Ratings.calc_upside t.ttm_cashflow pe intrinsic_value 
 
@@ -166,18 +166,12 @@ let rate_stocks ratings_data =
         fun (x : t) -> calc_dcf_upside x pe
       )          
       in
-      let dcf_upside_avg =
-        List.fold dcf_upsides ~init:0.0 ~f:(+.)
-        /. data_set_length
-      in
+      let dcf_upside_avg = Ratings.time_weighted_average dcf_upsides in
       let pl_values = List.map data_set ~f:(
         fun (x : t) ->
          Ratings.calc_peter_lynch_value x.eps_growth pe x.div_yield )          
       in
-      let pl_value_avg =
-        List.fold pl_values ~init:0.0 ~f:(+.) 
-        /. data_set_length
-      in
+      let pl_value_avg = Ratings.time_weighted_average pl_values in
       let intrinsic_price =
         Ratings.get_intrinsic_price hd.price dcf_upside_avg pl_value_avg
        in
