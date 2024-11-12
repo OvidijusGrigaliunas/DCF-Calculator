@@ -50,7 +50,7 @@ let fetch_backtest_data () =
         match result with
         |	symbol :: rating :: date :: y_return :: _ ->
           let rating = Sqlite3.Data.to_float_exn rating in
-          let range = get_range rating 0.05 in
+          let range = get_range rating 0.08 in
           let data : t =
             {
               symbol = Sqlite3.Data.to_string_exn symbol;

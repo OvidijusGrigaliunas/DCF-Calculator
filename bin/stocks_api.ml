@@ -326,7 +326,8 @@ let update_data () =
     update_fundamentals symbol;
     update_price symbol;
     let dur = Unix.gettimeofday () -. time in
-    printf "\r%*s (%d/%d) %*.2f s" (-7) symbol (index + 1) total (7) dur
+    printf "\r%*s (%d/%d) %*.2f s" (-7) symbol (index + 1) total (7) dur;
+    Thread.delay 0.5;
   );
   let end_time = Unix.gettimeofday () in
   printf "\rTotal time: %.2f\n" (end_time -. start);

@@ -81,8 +81,8 @@ let calc_upside cash_flow ttm instrinsic_value =
   (instrinsic_value /. (cash_flow *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
-  let peter_l_ratio = 0.3 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.7 *. (1.0 +. upside) in
+  let peter_l_ratio = 0.25 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.75 *. (1.0 +. upside) in
   let full_ratio = dcf_ratio +. peter_l_ratio in
   let a = price *. full_ratio in
   a
@@ -175,7 +175,7 @@ let calc_market_cap price shares_outstanding =
 
 let time_weighted_average ls =
   let rec loop i ls =
-    let weigth = (if i < 3 then 4 else if i < 7 then 2 else 1) |> Float.of_int in 
+    let weigth = (if i < 4 && i > 0 then 3 else if i < 7 then 2 else 1) |> Float.of_int in 
     match ls with
     | [] -> (0.0, weigth)
     | hd :: tl ->
@@ -234,7 +234,7 @@ let rate_stocks ?(filter = "none") stock_data =
           fun (a, _, _, _) -> String.(=) a tick_symbol) 
         in
         let dcf_upsides = List.map filtered_fl_financials ~f:(
-          fun (_, b, c, d) -> get_dcf_upside hd (b, c, d);)          
+          fun (_, b, c, d) -> get_dcf_upside hd (b, c, d))          
         in
         let dcf_upside_avg = time_weighted_average dcf_upsides in
 
