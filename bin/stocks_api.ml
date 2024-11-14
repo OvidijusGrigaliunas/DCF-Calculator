@@ -114,6 +114,9 @@ let extract_data_fin key (income_json, balance_json, cashflow_json) =
   let cash_flow =
     extract_from_json_list ~key:key cashflow_json "operatingCashflow" 0 to_int_exn
   in
+  let capital_expenditure =
+    extract_from_json_list ~key:key cashflow_json "capitalExpenditures" 0 to_int_exn
+  in
   let time = match key with
     | "annualReports" -> "FY"
     | _ -> "FQ"
@@ -124,7 +127,7 @@ let extract_data_fin key (income_json, balance_json, cashflow_json) =
        let financial = (year.(i),
           time,
           net_income.(i),
-          cash_flow.(i),
+          cash_flow.(i) - capital_expenditure.(i),
           revenue.(i),
           cash.(i),
           assests.(i), 

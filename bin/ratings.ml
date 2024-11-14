@@ -51,14 +51,14 @@ let calc_DFCA cash_flow growth discount =
   in
   let limit = 0.2 in
   let growth_limited = if Float.(<) growth limit then growth else limit in
-  let multiplier = 0.9 -. Float.abs(growth_limited) /. 3.0 in
-  let dcf_list = loop cash_flow 0.0 0.2 growth_limited multiplier |> List.rev in
+  let multiplier = 0.85 -. Float.abs(growth_limited) /. 3.0 in
+  let dcf_ls = loop cash_flow 0.0 0.2 growth_limited multiplier |> List.rev in
   let growth_10y = 
-    match dcf_list with
+    match dcf_ls with
     | (hd, _) :: _ -> hd
     | _ -> 0.0
   in
-  let discount_sum = List.fold ~init:0.0 dcf_list ~f:(fun acc (_, a) -> acc +. a) in
+  let discount_sum = List.fold ~init:0.0 dcf_ls ~f:(fun acc (_, a) -> acc +. a) in
   (growth_10y, discount_sum)  
 
 let calc_peter_lynch_value eps_growth pe div_yield =
@@ -81,8 +81,8 @@ let calc_upside cash_flow ttm instrinsic_value =
   (instrinsic_value /. (cash_flow *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
-  let peter_l_ratio = 0.25 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.75 *. (1.0 +. upside) in
+  let peter_l_ratio = 0.3 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.7 *. (1.0 +. upside) in
   let full_ratio = dcf_ratio +. peter_l_ratio in
   let a = price *. full_ratio in
   a
@@ -177,13 +177,15 @@ let time_weighted_average ls =
   let rec loop i ls =
     let weigth = (if i < 4 && i > 0 then 3 else if i < 7 then 2 else 1) |> Float.of_int in 
     match ls with
-    | [] -> (0.0, weigth)
+    | [] -> (0.0, 0.0)
     | hd :: tl ->
       let s, w = loop (i + 1) tl in  
      (hd *. weigth +. s, weigth +. w)
   in
   let sum, ind = (loop 0 ls) in
-  sum /. ind
+  match ind with
+  | 0.0 -> 0.0 
+  | _ -> sum /. ind
     
 let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
   let ( _,
@@ -258,7 +260,7 @@ let rate_stocks ?(filter = "none") stock_data =
         | "cheap" -> filter_under target_rating 0.0 0.6
         | "low" -> filter_under target_rating 0.6 0.8
         | "under" -> filter_under target_rating 0.8 1.0
-        | "fair" -> filter_under target_rating 1.0 1.3
+        | "fair" -> filter_under target_rating 1.0 1.2
         | hd -> filter_by_status status hd 
         in
         if is_printable then
