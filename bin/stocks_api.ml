@@ -320,17 +320,30 @@ let update_forex () =
 let update_data () =
   let symbols = Stocks_db.select_stocks_symbols () in
   let total = List.length symbols in
-  let start = Unix.gettimeofday () in
+  let start = Unix.gettimeofday () in  
   printf "%*s (%d/%d)" (-7) "" (0) total;
+
+  let rec update symbol =
+    try
+    (
+      update_stock symbol;
+      update_fundamentals symbol;
+      update_price symbol;
+    )
+    with _ ->
+    (
+      Thread.delay 5.0;
+      update symbol
+    );
+  in
   List.iteri symbols ~f:(fun index symbol ->
     let time = Unix.gettimeofday () in
     Stdio.Out_channel.flush stdout;
-    update_stock symbol;
-    update_fundamentals symbol;
-    update_price symbol;
+    
+    update symbol;
+    
     let dur = Unix.gettimeofday () -. time in
     printf "\r%*s (%d/%d) %*.2f s" (-7) symbol (index + 1) total (7) dur;
-    Thread.delay 0.5;
   );
   let end_time = Unix.gettimeofday () in
   printf "\rTotal time: %.2f\n" (end_time -. start);
