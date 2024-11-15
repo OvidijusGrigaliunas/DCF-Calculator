@@ -163,6 +163,7 @@ let calc_possible_returns data =
   
 
 let backtest () =
+  delete_ratings ();
   let start_time = Unix.gettimeofday () in
   print_endline "Extracting data";
   let data = fetch_backtest_data () in

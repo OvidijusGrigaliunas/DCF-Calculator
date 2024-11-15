@@ -5,6 +5,15 @@ let calc_eq_discount ?(expected_return = 0.20) market_cap debt =
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   eq_disc
 
+let calc_pe_discount pe =
+  let pe_ratio =
+    if Float.(<) pe 15.0 then
+      0.0
+    else
+      (pe -. 15.0) /. 800.0  
+  in
+  pe_ratio
+
 let calc_debt_discount market_cap debt tax bond_rate =
   debt /. market_cap *. bond_rate *. (1.0 -. tax)
 
@@ -27,10 +36,11 @@ let get_industry_rating industry sector =
   calc_industry_rating industry_risk sector_risk
 
 let calc_discount market_cap debt tax bond_rate
-    industry_rating =
+    industry_rating pe = 
+  let pe_disc = calc_pe_discount pe in
   let eq_disc = calc_eq_discount market_cap debt in
   let debt_disc = calc_debt_discount market_cap debt tax bond_rate in
-  (eq_disc +. debt_disc) *. industry_rating
+  (eq_disc +. debt_disc) *. industry_rating +. pe_disc
 
 let calc_DFCA cash_flow growth discount =
   let rec loop cash_flow year limiter growth growth_multiplier = 
@@ -161,15 +171,16 @@ let print_price_rating ratings =
 
 let filter_by_status stock_status filter =
     match filter with
-          | "none" -> true
-          | h -> String.(=) h (String.lowercase stock_status) 
+      | "none" -> true
+      | h -> String.(=) h (String.lowercase stock_status) 
 
 let filter_under price_discount lower_treshold treshold =
-          if
-            Float.( <= ) price_discount treshold
-            && Float.( > ) price_discount lower_treshold
-          then true
-          else false
+  if
+    Float.( <= ) price_discount treshold
+    && Float.( > ) price_discount lower_treshold
+  then true
+  else false
+
 let calc_market_cap price shares_outstanding =
   price *. shares_outstanding 
 
@@ -201,7 +212,7 @@ let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
   let market_cap = calc_market_cap price shares in
   let industry_rating = get_industry_rating industry sector in
   let discount =
-    calc_discount market_cap debt tax bond_rate industry_rating 
+    calc_discount market_cap debt tax bond_rate industry_rating pe 
   in
   let growth = calc_growth new_fcf old_fcf years in
   let intrinsic_value =
@@ -251,7 +262,7 @@ let rate_stocks ?(filter = "none") stock_data =
         let pl_value_avg = time_weighted_average pl_values in
         let intrinsic_price = match (Float.is_nan pl_value_avg) with
           | false -> get_intrinsic_price price dcf_upside_avg pl_value_avg
-          | true -> get_intrinsic_price price dcf_upside_avg 1.8
+          | true -> get_intrinsic_price price dcf_upside_avg 0.5
         in
         let rating, target_rating = rate_stock_price intrinsic_price price 1.0 in
         Stocks_db.insert_ratings tick_symbol rating target_rating;
