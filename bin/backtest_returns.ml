@@ -68,6 +68,12 @@ let fetch_backtest_data () =
   in
   f []
 
+let calc_rating_risk rating =
+  if (Float.(>) rating 1.0) then
+    1.0 +. Float.log(rating) /. (2.0 +. Float.abs(Float.log(rating)))
+  else
+    1.0 -. (1.0 -. rating) /. (15.0 +. (1.0 -. rating))
+
 let calc_avg_returns data =
   let rec while_range range stock_data =  
     match stock_data with
@@ -87,7 +93,7 @@ let calc_avg_returns data =
       let sum = List.fold data_set ~init:0.0 ~f:(
         fun acc (x : t) ->
           let risk_averse_return = 
-            if (Float.(<) x.yearly_return 0.0) then x.yearly_return *. 1.5 else x.yearly_return
+            if (Float.(<) x.yearly_return 0.0) then x.yearly_return *. 1.5 *. calc_rating_risk(x.rating) else x.yearly_return
           in 
           acc +. risk_averse_return
         )

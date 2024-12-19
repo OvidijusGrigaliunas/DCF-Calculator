@@ -1,16 +1,16 @@
 open Base
 open Stdio
 
-let calc_eq_discount ?(expected_return = 0.20) market_cap debt =
+let calc_eq_discount ?(expected_return = 0.15) market_cap debt =
   let eq_disc = market_cap /. (market_cap +. debt) *. expected_return in
   eq_disc
 
 let calc_pe_discount pe =
   let pe_ratio =
-    if Float.(<) pe 15.0 then
+    if Float.(<) pe 10.0 then
       0.0
     else
-      (pe -. 15.0) /. 400.0  
+      (pe -. 10.0) /. 800.0  
   in
   pe_ratio
 
@@ -23,24 +23,11 @@ let calc_growth new_fcf old_fcf duration =
   let growth = increase **. (1.0 /. (duration -. 1.0)) -. 1.0 in
   if Float.(<=) growth 0.0 || Float.is_nan growth then 0.0005 else growth 
   
-let calc_industry_rating industry_risk sector_risk =
-  let industry_and_sector_risk =
-    (industry_risk *. 0.6 +. sector_risk *. 0.4) 
-  in
-  industry_and_sector_risk 
-
-let get_industry_rating industry sector =
-  let industry_risk, sector_risk =
-    Stocks_db.select_sector_and_industry sector industry
-  in
-  calc_industry_rating industry_risk sector_risk
-
-let calc_discount market_cap debt tax bond_rate
-    industry_rating pe = 
+let calc_discount market_cap debt tax bond_rate pe = 
   let pe_disc = calc_pe_discount pe in
   let eq_disc = calc_eq_discount market_cap debt in
   let debt_disc = calc_debt_discount market_cap debt tax bond_rate in
-  (eq_disc +. debt_disc) *. industry_rating +. pe_disc
+  eq_disc +. debt_disc +. pe_disc
 
 let calc_DFCA cash_flow growth discount =
   let rec loop cash_flow year limiter growth growth_multiplier = 
@@ -91,9 +78,16 @@ let calc_upside cash_flow ttm instrinsic_value =
   (instrinsic_value /. (cash_flow *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
+  let pl_value =
+  match (Float.is_nan pl_value) with
+  | false ->
+    if Float.(>) pl_value 0.0 then pl_value
+    else 0.3
+  | true -> 0.3
+  in
   let peter_l_ratio = 0.2 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.8 *. (1.0 +. upside) in
-  let full_ratio = dcf_ratio +. peter_l_ratio in
+  let dcf_ratio = 0.8 *. (1.0 +. (if Float.(>) upside (-. 0.8) then upside else -. 0.8)) in
+  let full_ratio = dcf_ratio +. peter_l_ratio +. 1.0 |> Float.log2 in
   let a = price *. full_ratio in
   a
 
@@ -186,7 +180,7 @@ let calc_market_cap price shares_outstanding =
 
 let time_weighted_average ls =
   let rec loop i ls =
-    let weigth = (if i < 4 && i > 0 then 3 else if i < 7 then 2 else 1) |> Float.of_int in 
+    let weigth = (if i < 3 then 3 else if i < 6 then 2 else 1) |> Float.of_int in 
     match ls with
     | [] -> (0.0, 0.0)
     | hd :: tl ->
@@ -200,8 +194,8 @@ let time_weighted_average ls =
     
 let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
   let ( _,
-        industry, 
-        sector,
+        _, 
+        _,
         shares,
         pe,
         price,
@@ -210,9 +204,8 @@ let get_dcf_upside stock_data (new_fcf, old_fcf, years) =
         bond_rate,
         _, _, _) = stock_data in
   let market_cap = calc_market_cap price shares in
-  let industry_rating = get_industry_rating industry sector in
   let discount =
-    calc_discount market_cap debt tax bond_rate industry_rating pe 
+    calc_discount market_cap debt tax bond_rate pe 
   in
   let growth = calc_growth new_fcf old_fcf years in
   let intrinsic_value =
@@ -260,10 +253,7 @@ let rate_stocks ?(filter = "none") stock_data =
           calc_peter_lynch_value b pe div_yield )          
         in
         let pl_value_avg = time_weighted_average pl_values in
-        let intrinsic_price = match (Float.is_nan pl_value_avg) with
-          | false -> get_intrinsic_price price dcf_upside_avg pl_value_avg
-          | true -> get_intrinsic_price price dcf_upside_avg 0.5
-        in
+        let intrinsic_price = get_intrinsic_price price dcf_upside_avg pl_value_avg in
         let rating, target_rating = rate_stock_price intrinsic_price price 1.0 in
         Stocks_db.insert_ratings tick_symbol rating target_rating;
         let is_printable =

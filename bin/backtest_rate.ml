@@ -101,8 +101,7 @@ let calc_pe (t : t) =
 
 let calc_dcf_upside (t : t) pe =
   let market_cap = Ratings.calc_market_cap t.price t.shares in
-  let industry_rating = Ratings.calc_industry_rating t.industry_risk t.sector_risk in
-  let discount = Ratings.calc_discount market_cap t.debt t.tax t.bond_rate industry_rating pe in
+  let discount = Ratings.calc_discount market_cap t.debt t.tax t.bond_rate pe in
   let intrinsic_value = Ratings.calc_intrinsic_value pe t.ttm_cashflow t.cashflow_growth discount in
   Ratings.calc_upside t.ttm_cashflow pe intrinsic_value 
 
