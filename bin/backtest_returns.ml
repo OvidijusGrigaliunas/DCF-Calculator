@@ -50,7 +50,7 @@ let fetch_backtest_data () =
         match result with
         |	symbol :: rating :: date :: y_return :: _ ->
           let rating = Sqlite3.Data.to_float_exn rating in
-          let range = get_range rating 0.08 in
+          let range = get_range rating 0.10 in
           let data : t =
             {
               symbol = Sqlite3.Data.to_string_exn symbol;
@@ -86,7 +86,10 @@ let calc_avg_returns data =
       let data_set : (t list) = hd :: same_range in
       let sum = List.fold data_set ~init:0.0 ~f:(
         fun acc (x : t) ->
-          acc +. x.yearly_return
+          let risk_averse_return = 
+            if (Float.(<) x.yearly_return 0.0) then x.yearly_return *. 1.5 else x.yearly_return
+          in 
+          acc +. risk_averse_return
         )
       in
       let avg = sum /. (List.length data_set |> Float.of_int) in

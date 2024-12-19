@@ -10,7 +10,7 @@ let calc_pe_discount pe =
     if Float.(<) pe 15.0 then
       0.0
     else
-      (pe -. 15.0) /. 800.0  
+      (pe -. 15.0) /. 400.0  
   in
   pe_ratio
 
@@ -91,8 +91,8 @@ let calc_upside cash_flow ttm instrinsic_value =
   (instrinsic_value /. (cash_flow *. ttm)) -. 1.0
 
 let get_intrinsic_price price upside pl_value = 
-  let peter_l_ratio = 0.3 *. (pl_value /. 1.5) in
-  let dcf_ratio = 0.7 *. (1.0 +. upside) in
+  let peter_l_ratio = 0.2 *. (pl_value /. 1.5) in
+  let dcf_ratio = 0.8 *. (1.0 +. upside) in
   let full_ratio = dcf_ratio +. peter_l_ratio in
   let a = price *. full_ratio in
   a
